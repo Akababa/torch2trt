@@ -13,7 +13,7 @@ def slice_to_trt(dim_size, dim_slice):
     return start, size, stride
 
 
-def num_slice_types(slices):
+def num_slice_types(slices)
     num_slice = 0
     for s in slices:
         if isinstance(s, slice) or isinstance(s, int):
@@ -25,6 +25,8 @@ def num_slice_types(slices):
 def convert_tensor_getitem(ctx):
     input = ctx.method_args[0]
     slices = ctx.method_args[1]
+    if isinstance(slices, int):
+        slices = [slices]
     output = ctx.method_return
     
     input_trt = input._trt
