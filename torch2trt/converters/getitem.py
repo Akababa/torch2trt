@@ -13,7 +13,7 @@ def slice_to_trt(dim_size, dim_slice):
     return start, size, stride
 
 
-def num_slice_types(slices)
+def num_slice_types(slices):
     num_slice = 0
     for s in slices:
         if isinstance(s, slice) or isinstance(s, int):
