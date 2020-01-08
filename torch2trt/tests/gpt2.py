@@ -398,11 +398,6 @@ class GPT2Model(GPT2PreTrainedModel):
         position_ids = torch.arange(past_length, input_len + past_length, dtype=torch.long, device=device)
         position_ids = position_ids.unsqueeze(0)#.view(-1, input_len)
 
-        # Prepare head mask if needed
-        # 1.0 in head_mask indicate we keep the head
-        # attention_probs has shape bsz x n_heads x N x N
-        # head_mask has shape n_layer x batch x n_heads x N x N
-
         inputs_embeds = self.wte(input_ids.to(torch.long))
         position_embeds = self.wpe(position_ids)
         hidden_states = inputs_embeds + position_embeds
@@ -415,7 +410,7 @@ class GPT2Model(GPT2PreTrainedModel):
             outputs = block(hidden_states,
                             layer_past=layer_past)
 
-            hidden_states, present, _ = outputs
+            hidden_states, present = outputs[:2]
             if self.output_past:
                 presents = presents + (present,)
 
