@@ -20,7 +20,7 @@ def num_slice_types(slices):
             num_slice += 1
     return num_slice
 
-
+# TODO gather for list
 @tensorrt_converter('torch.Tensor.__getitem__')
 def convert_tensor_getitem(ctx):
     input = ctx.method_args[0]
