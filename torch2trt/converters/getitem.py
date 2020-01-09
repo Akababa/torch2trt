@@ -25,7 +25,7 @@ def num_slice_types(slices):
 def convert_tensor_getitem(ctx):
     input = ctx.method_args[0]
     slices = ctx.method_args[1]
-    if isinstance(slices, int):
+    if isinstance(slices, int) or isinstance(slices, slice):
         slices = (slices,)
     output = ctx.method_return
 
