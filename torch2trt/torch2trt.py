@@ -238,7 +238,7 @@ class ConversionHook(object):
 
 class ConversionContext(object):
     def __init__(self, network, converters=CONVERTERS):
-        self.network = network
+        self.network = network  # type: trt.INetworkDefinition
         self.lock = False
         self.method_args = None
         self.method_kwargs = None
@@ -421,9 +421,11 @@ def torch2trt(module,
 
 # DEFINE ALL CONVERSION FUNCTIONS
 
+from typing import Callable
 
-def tensorrt_converter(method, is_real=True):
-    def register_converter(converter):
+
+def tensorrt_converter(method: str, is_real=True):
+    def register_converter(converter: Callable[[ConversionContext], None]):
         CONVERTERS[method] = {'converter': converter, 'is_real': is_real}
         return converter
 

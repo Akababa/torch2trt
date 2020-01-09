@@ -5,6 +5,8 @@ from torch2trt.module_test import add_module_test
 @tensorrt_converter('torch.flatten')
 @tensorrt_converter('torch.Tensor.reshape')
 @tensorrt_converter('torch.Tensor.view')
+@tensorrt_converter('torch.Tensor.squeeze')
+@tensorrt_converter('torch.Tensor.unsqueeze')
 def convert_view(ctx):
     input = ctx.method_args[0]
     input_trt = trt_(ctx.network, input)

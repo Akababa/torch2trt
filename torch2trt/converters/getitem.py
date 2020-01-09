@@ -26,7 +26,7 @@ def convert_tensor_getitem(ctx):
     input = ctx.method_args[0]
     slices = ctx.method_args[1]
     if isinstance(slices, int):
-        slices = [slices]
+        slices = (slices,)
     output = ctx.method_return
     
     input_trt = input._trt

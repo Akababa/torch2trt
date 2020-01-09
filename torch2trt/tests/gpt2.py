@@ -381,25 +381,27 @@ class GPT2Model(GPT2PreTrainedModel):
         for layer, heads in heads_to_prune.items():
             self.h[layer].attn.prune_heads(heads)
 
-    def forward(self, input_ids: torch.Tensor=None, past=None):
-        if input_ids is not None:
-            input_shape = input_ids.size()
-            input_ids = input_ids.view(-1, input_shape[-1])
-        else:
+    def forward(self, input_ids: torch.Tensor = None, past=None):
+        if input_ids is None:
             raise ValueError("You have to specify either input_ids or inputs_embeds")
+
+        input_shape = input_ids.size()
         input_len = input_shape[-1]
+        input_ids = input_ids.view(-1, input_len)
 
         if past is None:
             past_length = 0
             past = [None] * len(self.h)
         else:
             past_length = past.size(-2)
-        device = input_ids.device
-        position_ids = torch.arange(past_length, input_len + past_length, dtype=torch.long, device=device)
-        position_ids = position_ids.unsqueeze(0)#.view(-1, input_len)
+        # device = input_ids.device
+        position_embeds = self.wpe.weight[past_length:past_length + input_len].unsqueeze(0)  # put in the batch
+        # position_ids = torch.arange(past_length, input_len + past_length, dtype=torch.long, device=device)
+        # position_ids = position_ids.unsqueeze(0)  # .view(-1, input_len)
 
-        inputs_embeds = self.wte(input_ids.to(torch.long))
-        position_embeds = self.wpe(position_ids)
+        # inputs_embeds = self.wte(input_ids.to(torch.long))
+        inputs_embeds = self.wte.weight[input_ids]
+        # position_embeds = self.wpe(position_ids)
         hidden_states = inputs_embeds + position_embeds
         hidden_states = self.drop(hidden_states)
 
@@ -487,4 +489,3 @@ class GPT2LMHeadModel(GPT2PreTrainedModel):
         outputs = (lm_logits,) + transformer_outputs[1:]
 
         return outputs  # (loss), lm_logits, presents, (all hidden_states), (attentions)
-
