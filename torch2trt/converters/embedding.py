@@ -1,15 +1,19 @@
 from torch2trt.torch2trt import *
 from torch2trt.module_test import add_module_test
-
+from .getitem import slice_to_trt
 
 @tensorrt_converter('torch.nn.Embedding.forward')
 def convert_Embedding(ctx: ConversionContext):
     module = ctx.method_args[0]  # type: torch.nn.Embedding
     input = ctx.method_args[1]
-    input_trt = trt_(ctx.network, input)
-    output = ctx.method_return
-
     weight = module.weight.detach().cpu().numpy()
+    output = ctx.method_return
+    if isinstance(input, slice):
+        start, size, stride = slice_to_trt(weight.shape[0], input)
+        output._trt = ctx.network.add_slice(weight, start, size, stride).get_output(0)
+        return
+
+    input_trt = trt_(ctx.network, input)
     # embedding_dim = module.embedding_dim
 
     layer = ctx.network.add_gather(weight, input_trt, 0)
