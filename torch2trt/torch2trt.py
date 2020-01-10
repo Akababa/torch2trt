@@ -102,6 +102,7 @@ def add_trt_constant(network, tensor):
     return layer.get_output(0)
 
 
+# TODO remove this
 def check_torch_dtype(*tensors):
     dtype = None
     for t in tensors:
@@ -110,8 +111,8 @@ def check_torch_dtype(*tensors):
                 dtype = t.dtype
             else:
                 assert (dtype == t.dtype)  # , 'Tensor data types must match')
-    assert (dtype is not None)  # , 'Data type could not be inferred from any item in list')
-    return dtype
+    # assert (dtype is not None)  # , 'Data type could not be inferred from any item in list')
+    return dtype or torch.float32
 
 
 def trt_(network, *tensors):
@@ -125,7 +126,7 @@ def trt_(network, *tensors):
     dtype = check_torch_dtype(*tensors)
 
     # get broadcast dimension
-    broadcast_num_dim = 0
+    broadcast_num_dim = 1  # 0 dim doesn't exist
     for t in tensors:
         if isinstance(t, torch.Tensor):
             if not hasattr(t, '_trt'):  # It's a constant!!
