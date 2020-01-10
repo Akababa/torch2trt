@@ -88,7 +88,7 @@ def torch_dim_to_trt_axes(dim, ndim=None):
     for d in dim:
         if d < 0:
             assert ndim is not None
-            d = ndim - d
+            d = ndim + d
         assert d >= 1
         axes |= 1 << (d - 1)  # -1 to remove batch dimension
 
