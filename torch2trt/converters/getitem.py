@@ -108,7 +108,7 @@ def convert_tensor_getitem(ctx: ConversionContext):
             strides.append(1)
         else:
             raise ValueError("Invalid slice")
-    starts, sizes, strides = dynamify_slices(starts,sizes,strides)
+    # starts, sizes, strides = dynamify_slices(starts,sizes,strides)
 
     # print("starts,sizes,strides:", starts, sizes, strides)
     assert len(starts) == len(sizes) == len(strides) == len(new_slices) == len(input_trt.shape)

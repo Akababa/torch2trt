@@ -2,6 +2,7 @@ from torch2trt.torch2trt import *
 from torch2trt.module_test import add_module_test
 
 
+# TODO debug this
 @tensorrt_converter('torch.layer_norm')
 @tensorrt_converter('torch.nn.functional.layer_norm')
 def convert_layer_norm(ctx):
@@ -21,19 +22,28 @@ def convert_layer_norm(ctx):
 
     # compute mean over spatial
     mean_trt = ctx.network.add_reduce(input._trt, trt.ReduceOperation.AVG, reduce_axes, keep_dims).get_output(0)
+    assert len(mean_trt.shape) >= 0
 
     # compute variance over spatial (include eps, to reduce layer count)
     delta_trt = ctx.network.add_elementwise(input._trt, mean_trt, trt.ElementWiseOperation.SUB).get_output(0)
+    assert len(delta_trt.shape) >= 0
+
     var_trt = ctx.network.add_scale(delta_trt, trt.ScaleMode.UNIFORM, np.zeros_like(eps_np), np.ones_like(eps_np),
                                     2 * np.ones_like(eps_np)).get_output(0)
+    assert len(var_trt.shape) >= 0
+
     var_trt = ctx.network.add_reduce(var_trt, trt.ReduceOperation.AVG, reduce_axes, keep_dims).get_output(0)
+    assert len(var_trt.shape) >= 0
+
 
     # compute sqrt(var + eps)
     var_trt = ctx.network.add_scale(var_trt, trt.ScaleMode.UNIFORM, eps_np, np.ones_like(eps_np),
                                     0.5 * np.ones_like(eps_np)).get_output(0)
+    assert len(var_trt.shape) >= 0
 
     # compute final result
     result_trt = ctx.network.add_elementwise(delta_trt, var_trt, trt.ElementWiseOperation.DIV).get_output(0)
+    assert len(result_trt.shape) >= 0
 
     # compute affine (if applicable)
     weight_np = weight.detach().cpu().numpy()
@@ -44,3 +54,4 @@ def convert_layer_norm(ctx):
     #                                np.ones_like(bias_np))
 
     output._trt = result_trt
+    assert len(result_trt.shape) >= 0
