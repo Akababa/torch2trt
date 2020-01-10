@@ -28,6 +28,8 @@ for method in TORCH_METHODS:
     
     @tensorrt_converter(method, is_real=False)
     def warn_method(ctx):
+        # if "__iter__" in ctx.method_str:
+        #     pass
         print('Warning: Encountered known unsupported method %s' % ctx.method_str)
         
 

@@ -1,5 +1,4 @@
-import torch
-import torchvision
+from typing import List, Any
 
 
 class ModuleTest(object):
@@ -9,12 +8,12 @@ class ModuleTest(object):
         self.device = device
         self.input_shapes = input_shapes
         self.torch2trt_kwargs = torch2trt_kwargs
-        
+
     def module_name(self):
         return self.module_fn.__module__ + '.' + self.module_fn.__name__
 
 
-MODULE_TESTS = [
+MODULE_TESTS: List[ModuleTest] = [
 ]
 
 
@@ -23,4 +22,5 @@ def add_module_test(dtype, device, input_shapes, **torch2trt_kwargs):
         global MODULE_TESTS
         MODULE_TESTS += [ModuleTest(module, dtype, device, input_shapes, **torch2trt_kwargs)]
         return module
+
     return register_module_test

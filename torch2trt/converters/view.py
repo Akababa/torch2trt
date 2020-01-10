@@ -12,7 +12,7 @@ def convert_view(ctx):
     input_trt = trt_(ctx.network, input)
     output = ctx.method_return
     layer = ctx.network.add_shuffle(input_trt)
-    layer.reshape_dims = tuple(output.shape[1:])
+    layer.reshape_dims = tuple(output.shape[1:])  # TRT tensors have no batch dim (always implicit)
     output._trt = layer.get_output(0)
 
 

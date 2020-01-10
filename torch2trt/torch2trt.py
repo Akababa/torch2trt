@@ -68,14 +68,28 @@ def trt_num_outputs(engine):
     return count
 
 
-def torch_dim_to_trt_axes(dim):
+def get_dim_to_trt_axes(ctx):
+    ndim = ctx.method_args[0].dim()
+    dim = get_arg(ctx, 'dim', pos=1, default=range(1, ndim))
+
+    axes = torch_dim_to_trt_axes(dim, ndim)
+    return axes
+
+
+def torch_dim_to_trt_axes(dim, ndim=None):
     """Converts torch dim, or tuple of dims to a tensorrt axes bitmask"""
+    if isinstance(dim, list):
+        dim = tuple(dim)
     if not isinstance(dim, tuple):
         dim = (dim,)
 
     # create axes bitmask for reduce layer
     axes = 0
     for d in dim:
+        if d < 0:
+            assert ndim is not None
+            d = ndim - d
+        assert d >= 1
         axes |= 1 << (d - 1)  # -1 to remove batch dimension
 
     return axes
@@ -101,7 +115,11 @@ def check_torch_dtype(*tensors):
 
 
 def trt_(network, *tensors):
-    """Creates missing TensorRT tensors and adds shuffle layers to make tensors broadcastable"""
+    """
+    Creates missing TensorRT tensors and adds shuffle layers to make tensors broadcastable
+    TRT tensors are missing batch dimension (implicit) except for constants, while pytorch tensors
+    have the first batch dim (explicit)
+    """
     trt_tensors = [None] * len(tensors)
 
     dtype = check_torch_dtype(*tensors)
@@ -357,7 +375,7 @@ def torch2trt(module,
               int8_mode=False,
               int8_calib_dataset=None,
               int8_calib_algorithm=DEFAULT_CALIBRATION_ALGORITHM,
-              flags=0,
+              build_flags=0,
               optimization_profile=None):
     inputs_in = inputs
 
@@ -366,7 +384,7 @@ def torch2trt(module,
 
     logger = trt.Logger(log_level)
     builder = trt.Builder(logger)
-    network = builder.create_network(flags=flags)
+    network = builder.create_network(flags=build_flags)
 
     with ConversionContext(network) as ctx:
 
@@ -426,6 +444,9 @@ from typing import Callable
 
 def tensorrt_converter(method: str, is_real=True):
     def register_converter(converter: Callable[[ConversionContext], None]):
+        if method in CONVERTERS:
+            if CONVERTERS[method]["is_real"]:
+                raise AttributeError(f"Overwrote {method}")
         CONVERTERS[method] = {'converter': converter, 'is_real': is_real}
         return converter
 

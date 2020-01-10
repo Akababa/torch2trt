@@ -1,6 +1,5 @@
 from torch2trt.torch2trt import *
 from torch2trt.module_test import add_module_test
-from .getitem import slice_to_trt
 
 @tensorrt_converter('torch.nn.Embedding.forward')
 def convert_Embedding(ctx: ConversionContext):
