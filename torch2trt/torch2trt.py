@@ -117,8 +117,8 @@ def check_torch_dtype(*tensors):
 def trt_(network, *tensors):
     """
     Creates missing TensorRT tensors and adds shuffle layers to make tensors broadcastable
-    TRT tensors are missing batch dimension (implicit) except for constants, while pytorch tensors
-    have the first batch dim (explicit)
+    TRT tensors are missing batch dimension (implicit) EXCEPT for CONSTANTS,
+     while pytorch tensors have the first batch dim (explicit)
     """
     trt_tensors = [None] * len(tensors)
 
@@ -128,9 +128,9 @@ def trt_(network, *tensors):
     broadcast_num_dim = 0
     for t in tensors:
         if isinstance(t, torch.Tensor):
-            if not hasattr(t, '_trt'):
+            if not hasattr(t, '_trt'):  # It's a constant!!
                 num_dim = len(t.shape)  # don't exclude batch for constants
-            else:
+            else:  # It's a variable (on input path)
                 num_dim = len(t._trt.shape)  # non-leaf tensors must already have _trt, get shape from that
             if num_dim > broadcast_num_dim:
                 broadcast_num_dim = num_dim

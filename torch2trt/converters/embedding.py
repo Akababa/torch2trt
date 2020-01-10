@@ -6,15 +6,13 @@ def convert_Embedding(ctx: ConversionContext):
     module = ctx.method_args[0]  # type: torch.nn.Embedding
     input = ctx.method_args[1]
     input_trt = trt_(ctx.network, input)
+    weight = trt_(ctx.network, module.weight.data)
     output = ctx.method_return
-
-    weight = module.weight.detach().cpu().numpy()
-    # embedding_dim = module.embedding_dim
 
     layer = ctx.network.add_gather(weight, input_trt, 0)
     layer.num_elementwise_dims = 0
-    if not ctx.network.has_implicit_batch_dimension and len(input.shape) == 2:
-        layer.num_elementwise_dims = 1
+    # if not ctx.network.has_implicit_batch_dimension and len(input_trt.shape) == 2:
+    #     layer.num_elementwise_dims = 1
 
     output._trt = layer.get_output(0)
 

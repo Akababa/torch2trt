@@ -23,7 +23,7 @@ def num_slice_types(slices):
 # TODO gather for list
 # THIS DOES NOT USE IMPLICIT BATCH DIM, UNLIKE EVERY OTHER CONVERTER
 @tensorrt_converter('torch.Tensor.__getitem__')
-def convert_tensor_getitem(ctx):
+def convert_tensor_getitem(ctx: ConversionContext):
     input = ctx.method_args[0]
     slices = ctx.method_args[1]
     if isinstance(slices, int) or isinstance(slices, slice):
@@ -36,37 +36,39 @@ def convert_tensor_getitem(ctx):
 
     num_ellipsis = input.ndim - num_slice_types(slices)
 
+    num_slices = 0
     new_slices = []
     for s in slices:
-
         if s == Ellipsis:
             while num_ellipsis > 0:
                 new_slices.append(slice(None, None, None))
                 num_ellipsis -= 1
         elif isinstance(s, slice):
             new_slices.append(s)
+            num_slices += 1
         elif s is None:
             new_slices.append(None)
         elif isinstance(s, int):
             new_slices.append(s)
+        else:
+            raise ValueError(f"unsupported type {type(s)} in __getitem__")
+    # if num_slices > 1:
+    #     print("WARNING: multiple slices unsupported but will try anyway")
+    # should be no missing slices at end
+    # assert num_slice_types(new_slices) == input.ndim
 
     # fill missing slices at end
     while num_slice_types(new_slices) < len(input.shape):
         new_slices.append(slice(None, None, None))
 
     # # Step 2 - Remove batch from slices (TRT from this point)
-    #
     # slices = tuple(new_slices[1:]) # remove batch
-    slices = tuple(new_slices)
 
     # Step 3 - Add slice layer (will currently ignore 'None' slices)
 
-    starts = []
-    sizes = []
-    strides = []
-
+    starts, sizes, strides = [], [], []
     input_dim = 0
-    for s in slices:
+    for s in new_slices:
 
         if input_dim >= len(input_trt.shape):
             break
@@ -90,13 +92,14 @@ def convert_tensor_getitem(ctx):
 
     # Step 4 - Add shuffle layer to insert dimensions for 'None' slices and remove dimensions for 'int' slices
 
-    num_non_slice = len([s for s in slices if not isinstance(s, slice)])
+    num_non_slice = len([s for s in new_slices if not isinstance(s, slice)])
     if num_non_slice > 0:
         layer = ctx.network.add_shuffle(output_trt)
         layer.reshape_dims = tuple(output.shape)  # don't exclude batch
         output_trt = layer.get_output(0)
 
     output._trt = output_trt
+    assert len(output_trt.shape) >= 0
 
 
 class LambdaModule(torch.nn.Module):

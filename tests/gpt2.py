@@ -130,8 +130,8 @@ class Attention(nn.Module):
         key = self.split_heads(key, k=True)
         value = self.split_heads(value)
         if layer_past is not None:
-            past_key = layer_past[:, 0, ...].transpose(-2, -1)
-            past_value = layer_past[:, 1, ...]  # transpose back cf below
+            past_key = layer_past[:, 0].transpose(-2, -1)
+            past_value = layer_past[:, 1]  # transpose back cf below
             key = torch.cat((past_key, key), dim=-1)
             value = torch.cat((past_value, value), dim=-2)
         present = torch.stack((key.transpose(-2, -1), value))  # transpose to have same shapes for stacking
@@ -209,7 +209,7 @@ class GPT2Model(GPT2PreTrainedModel):
     def __init__(self, config):
         super(GPT2Model, self).__init__(config)
         self.output_past = config.output_past
-        self.device = torch.device("cuda")
+        # self.device = torch.device("cuda")
 
         self.wte = nn.Embedding(config.vocab_size, config.n_embd)
         self.wpe = nn.Embedding(config.n_positions, config.n_embd)
@@ -228,8 +228,8 @@ class GPT2Model(GPT2PreTrainedModel):
     def forward(self, input_ids: torch.Tensor = None, past=None):
         if input_ids is None:
             raise ValueError("You have to specify either input_ids or inputs_embeds")
-        input_ids = input_ids.to(self.device)
-        past = past.to(self.device)
+        # input_ids = input_ids.to(self.device)
+        # past = past.to(self.device)
         batch_size, input_len = input_ids.size()
         past_length = past.size(-2)
 
@@ -242,7 +242,7 @@ class GPT2Model(GPT2PreTrainedModel):
 
         presents = []
         for i in range(self.config.n_layer):
-            layer_past = past[:, i, :, :, :, :]
+            layer_past = past[:, i]
             trans_block = self.h[i]
             hidden_states, present = trans_block(hidden_states, layer_past=layer_past)
             presents.append(present)
