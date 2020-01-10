@@ -209,6 +209,7 @@ class GPT2Model(GPT2PreTrainedModel):
     def __init__(self, config):
         super(GPT2Model, self).__init__(config)
         self.output_past = config.output_past
+        self.device = torch.device("cuda")
 
         self.wte = nn.Embedding(config.vocab_size, config.n_embd)
         self.wpe = nn.Embedding(config.n_positions, config.n_embd)
@@ -227,7 +228,8 @@ class GPT2Model(GPT2PreTrainedModel):
     def forward(self, input_ids: torch.Tensor = None, past=None):
         if input_ids is None:
             raise ValueError("You have to specify either input_ids or inputs_embeds")
-
+        input_ids = input_ids.to(self.device)
+        past = past.to(self.device)
         batch_size, input_len = input_ids.size()
         past_length = past.size(-2)
 

@@ -3,7 +3,6 @@ from torch2trt.module_test import add_module_test
 
 
 def slice_to_trt(dim_size, dim_slice):
-
     start = 0 if dim_slice.start is None else dim_slice.start
     stop = dim_size if dim_slice.stop is None else dim_slice.stop
     stride = 1 if dim_slice.step is None else dim_slice.step
@@ -20,7 +19,9 @@ def num_slice_types(slices):
             num_slice += 1
     return num_slice
 
+
 # TODO gather for list
+# THIS DOES NOT USE IMPLICIT BATCH DIM, UNLIKE EVERY OTHER CONVERTER
 @tensorrt_converter('torch.Tensor.__getitem__')
 def convert_tensor_getitem(ctx):
     input = ctx.method_args[0]
@@ -53,13 +54,13 @@ def convert_tensor_getitem(ctx):
     while num_slice_types(new_slices) < len(input.shape):
         new_slices.append(slice(None, None, None))
 
-    # Step 2 - Remove batch from slices (TRT from this point)
-
-    slices = tuple(new_slices[1:]) # remove batch
-
+    # # Step 2 - Remove batch from slices (TRT from this point)
+    #
+    # slices = tuple(new_slices[1:]) # remove batch
+    slices = tuple(new_slices)
 
     # Step 3 - Add slice layer (will currently ignore 'None' slices)
-    
+
     starts = []
     sizes = []
     strides = []
@@ -92,7 +93,7 @@ def convert_tensor_getitem(ctx):
     num_non_slice = len([s for s in slices if not isinstance(s, slice)])
     if num_non_slice > 0:
         layer = ctx.network.add_shuffle(output_trt)
-        layer.reshape_dims = tuple(output.shape[1:]) # exclude batch
+        layer.reshape_dims = tuple(output.shape)  # don't exclude batch
         output_trt = layer.get_output(0)
 
     output._trt = output_trt

@@ -149,6 +149,8 @@ def trt_(network, *tensors):
             # add leaf tensor
             shape = tuple(t.shape)  # don't exclude batch when adding constants...?
             weight = t.detach().cpu().numpy()
+            if weight.dtype == np.int64:  # TRT doesn't support long
+                weight = weight.astype(np.int32)
             t._trt = network.add_constant(shape, weight).get_output(0)
             trt_tensor = t._trt
 

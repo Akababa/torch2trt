@@ -5,6 +5,7 @@ from torch2trt.module_test import add_module_test
 @tensorrt_converter('torch.layer_norm')
 @tensorrt_converter('torch.nn.functional.layer_norm')
 def convert_layer_norm(ctx):
+    # TODO Optimize this
     input = get_arg(ctx, 'input', pos=0, default=None)
     normalized_shape = get_arg(ctx, 'normalized_shape', pos=1, default=None)
     weight = get_arg(ctx, 'weight', pos=2, default=None)
