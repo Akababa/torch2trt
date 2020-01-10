@@ -68,21 +68,22 @@ def trt_num_outputs(engine):
     return count
 
 
-def get_dim_to_trt_axes(ctx):
+def get_dim_to_trt_axes(ctx, only_one=False):
     ndim = ctx.method_args[0].dim()
     dim = get_arg(ctx, 'dim', pos=1, default=range(1, ndim))
 
-    axes = torch_dim_to_trt_axes(dim, ndim)
+    axes = torch_dim_to_trt_axes(dim, ndim, only_one=only_one)
     return axes
 
 
-def torch_dim_to_trt_axes(dim, ndim=None):
+def torch_dim_to_trt_axes(dim, ndim=None, only_one=False):
     """Converts torch dim, or tuple of dims to a tensorrt axes bitmask"""
     if isinstance(dim, list):
         dim = tuple(dim)
     if not isinstance(dim, tuple):
         dim = (dim,)
-
+    if only_one:
+        assert len(dim) == 1
     # create axes bitmask for reduce layer
     axes = 0
     for d in dim:
@@ -90,6 +91,8 @@ def torch_dim_to_trt_axes(dim, ndim=None):
             assert ndim is not None
             d = ndim + d
         assert d >= 1
+        if only_one:
+            return d - 1
         axes |= 1 << (d - 1)  # -1 to remove batch dimension
 
     return axes

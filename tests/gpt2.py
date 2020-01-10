@@ -132,7 +132,7 @@ class Attention(nn.Module):
         if layer_past is not None:
             past_key = layer_past[0].transpose(-2, -1)
             past_value = layer_past[1]  # transpose back cf below
-            key = torch.cat((past_key, key), dim=-1)
+            key = torch.cat((past_key, key), dim=-1)  # this one crashes colab
             value = torch.cat((past_value, value), dim=-2)
         present = torch.stack((key.transpose(-2, -1), value))  # transpose to have same shapes for stacking
 
