@@ -79,20 +79,20 @@ def gelu(x):
 
 
 class Attention(nn.Module):
-    def __init__(self, nx, n_ctx, config, scale=False):
+    def __init__(self, n_embd, n_ctx, config, scale=False):
         super(Attention, self).__init__()
         self.output_attentions = config.output_attentions
 
-        n_state = nx  # in Attention: n_state=768 (nx=n_embd)
-        # [switch nx => n_state from Block to Attention to keep identical to TF implem]
-        assert n_state % config.n_head == 0
+        # in Attention: n_embd=768 (nx=n_embd)
+        # [switch nx => n_embd from Block to Attention to keep identical to TF implem]
+        assert n_embd % config.n_head == 0
         self.register_buffer("bias", torch.tril(torch.ones(n_ctx, n_ctx)).view(1, 1, n_ctx, n_ctx))
         self.n_head = config.n_head
-        self.split_size = n_state
+        self.split_size = n_embd
         self.scale = scale
 
-        self.c_attn = Conv1D(n_state * 3, nx)
-        self.c_proj = Conv1D(n_state, nx)
+        self.c_attn = Conv1D(n_embd * 3, n_embd)
+        self.c_proj = Conv1D(n_embd, n_embd)
         self.attn_dropout = nn.Dropout(config.attn_pdrop)
         self.resid_dropout = nn.Dropout(config.resid_pdrop)
         self.pruned_heads = set()
@@ -130,8 +130,8 @@ class Attention(nn.Module):
         key = self.split_heads(key, k=True)
         value = self.split_heads(value)
         if layer_past is not None:
-            past_key = layer_past[:, 0].transpose(-2, -1)
-            past_value = layer_past[:, 1]  # transpose back cf below
+            past_key = layer_past[0].transpose(-2, -1)
+            past_value = layer_past[1]  # transpose back cf below
             key = torch.cat((past_key, key), dim=-1)
             value = torch.cat((past_value, value), dim=-2)
         present = torch.stack((key.transpose(-2, -1), value))  # transpose to have same shapes for stacking
@@ -148,9 +148,9 @@ class Attention(nn.Module):
 class MLP(nn.Module):
     def __init__(self, n_state, config):  # in MLP: n_state=3072 (4 * n_embd)
         super(MLP, self).__init__()
-        nx = config.n_embd
-        self.c_fc = Conv1D(n_state, nx)
-        self.c_proj = Conv1D(nx, n_state)
+        n_embd = config.n_embd
+        self.c_fc = Conv1D(n_state, n_embd)
+        self.c_proj = Conv1D(n_embd, n_state)
         self.act = gelu
         self.dropout = nn.Dropout(config.resid_pdrop)
 
@@ -163,11 +163,11 @@ class MLP(nn.Module):
 class Block(nn.Module):
     def __init__(self, n_ctx, config, scale=False):
         super(Block, self).__init__()
-        nx = config.n_embd
-        self.ln_1 = nn.LayerNorm(nx, eps=config.layer_norm_epsilon)
-        self.attn = Attention(nx, n_ctx, config, scale)
-        self.ln_2 = nn.LayerNorm(nx, eps=config.layer_norm_epsilon)
-        self.mlp = MLP(4 * nx, config)
+        n_embd = config.n_embd
+        self.ln_1 = nn.LayerNorm(n_embd, eps=config.layer_norm_epsilon)
+        self.attn = Attention(n_embd, n_ctx, config, scale)
+        self.ln_2 = nn.LayerNorm(n_embd, eps=config.layer_norm_epsilon)
+        self.mlp = MLP(4 * n_embd, config)
 
     def forward(self, x, layer_past=None):
         a, present = self.attn(self.ln_1(x), layer_past=layer_past)
@@ -225,13 +225,17 @@ class GPT2Model(GPT2PreTrainedModel):
     def set_input_embeddings(self, new_embeddings):
         self.wte = new_embeddings
 
-    def forward(self, input_ids: torch.Tensor = None, past=None):
+    def forward(self, input_ids: torch.Tensor, **kwargs):
         if input_ids is None:
             raise ValueError("You have to specify either input_ids or inputs_embeds")
+
+        past = []
+        for layer_idx in range(self.config.n_layer):
+            past.append([kwargs[f"past_{layer_idx}_k"], kwargs[f"past_{layer_idx}_v"]])
         # input_ids = input_ids.to(self.device)
         # past = past.to(self.device)
         batch_size, input_len = input_ids.size()
-        past_length = past.size(-2)
+        past_length = past[0][0].size(-2)  # TODO make this dynamic
 
         position_embeds = self.wpe.weight[past_length:past_length + input_len].unsqueeze(0)  # put in the batch
         print(position_embeds.device)
@@ -242,7 +246,7 @@ class GPT2Model(GPT2PreTrainedModel):
 
         presents = []
         for i in range(self.config.n_layer):
-            layer_past = past[:, i]
+            layer_past = past[i]
             trans_block = self.h[i]
             hidden_states, present = trans_block(hidden_states, layer_past=layer_past)
             presents.append(present)
@@ -265,9 +269,8 @@ class GPT2LMHeadModel(GPT2PreTrainedModel):
     def get_output_embeddings(self):
         return self.lm_head
 
-    def forward(self, input_ids=None, past=None):
-        transformer_outputs = self.transformer(input_ids,
-                                               past=past)
+    def forward(self, input_ids: torch.Tensor, **kwargs):
+        transformer_outputs = self.transformer(input_ids, **kwargs)
         hidden_states = transformer_outputs[0]
 
         lm_logits = self.lm_head(hidden_states)

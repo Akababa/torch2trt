@@ -7,7 +7,13 @@ def slice_to_trt(dim_size, dim_slice):
     stop = dim_size if dim_slice.stop is None else dim_slice.stop
     stride = 1 if dim_slice.step is None else dim_slice.step
 
-    size = (stop - start - 1) // stride + 1
+    if isinstance(dim_size, trt.ITensor):
+        if start == 0 and stride == 1:
+            size = dim_size
+        else:
+            raise NotImplementedError("Only full slice (:) on dynamic axis supported")
+    else:
+        size = (stop - start - 1) // stride + 1
 
     return start, size, stride
 
@@ -19,9 +25,17 @@ def num_slice_types(slices):
             num_slice += 1
     return num_slice
 
+# def list_to_itensor(ctx, lst):
+#     consts = ctx.network.add_constant([a if isinstance(a, int) else -1 for a in lst]).get_output(0)
+#     varias = ctx.network.add_constant([a if isinstance(a, int) else -1 for a in lst]).get_output(0)
+
+
+# def dynamify_slices(starts, sizes, strides):
+#     if not all(isinstance(x, int) for x in strides):
+#         pass
 
 # TODO gather for list
-# THIS DOES NOT USE IMPLICIT BATCH DIM, UNLIKE EVERY OTHER CONVERTER
+# THIS DOES NOT ASSUME IMPLICIT BATCH DIM, UNLIKE EVERY OTHER CONVERTER
 @tensorrt_converter('torch.Tensor.__getitem__')
 def convert_tensor_getitem(ctx: ConversionContext):
     input = ctx.method_args[0]
@@ -30,7 +44,8 @@ def convert_tensor_getitem(ctx: ConversionContext):
         slices = (slices,)
     output = ctx.method_return
 
-    input_trt = trt_(ctx.network, input)
+    input_trt = trt_(ctx.network, input)  # may or may not have a batch dim
+    is_const = len(input_trt.shape) == input.dim()  # Only constant tensors have the batch axis
 
     # Step 1 - Replace ellipsis with expanded slices
 
@@ -46,20 +61,25 @@ def convert_tensor_getitem(ctx: ConversionContext):
         elif isinstance(s, slice):
             new_slices.append(s)
             num_slices += 1
-        elif s is None:
-            new_slices.append(None)
         elif isinstance(s, int):
             new_slices.append(s)
         else:
             raise ValueError(f"unsupported type {type(s)} in __getitem__")
-    # if num_slices > 1:
-    #     print("WARNING: multiple slices unsupported but will try anyway")
-    # should be no missing slices at end
-    # assert num_slice_types(new_slices) == input.ndim
 
     # fill missing slices at end
     while num_slice_types(new_slices) < len(input.shape):
         new_slices.append(slice(None, None, None))
+    # print("new_slices:",new_slices)
+    # print("input shape:", input.shape)
+    # print("input_trt shape:", input_trt.shape)
+    assert len(new_slices) == input.dim()
+
+    if not is_const:
+        if new_slices[0] != slice(None, None, None):
+            raise ValueError(f"can't slice on batch dimension")
+        new_slices = new_slices[1:]
+        # print("new_slices shrink to:", new_slices)
+        assert len(new_slices) == len(input_trt.shape)
 
     # # Step 2 - Remove batch from slices (TRT from this point)
     # slices = tuple(new_slices[1:]) # remove batch
@@ -67,39 +87,47 @@ def convert_tensor_getitem(ctx: ConversionContext):
     # Step 3 - Add slice layer (will currently ignore 'None' slices)
 
     starts, sizes, strides = [], [], []
-    input_dim = 0
-    for s in new_slices:
+    input_trt_shape = ctx.network.add_shape(input_trt).get_output(0)
+    for i, (s, input_size) in enumerate(zip(new_slices, input_trt.shape)):
+        if input_size == -1:
+            raise NotImplementedError("sorry no dynamic sizes")
+            if s == slice(None, None, None):
+                # dynamic input size - only support full slices for now
+                input_size = ctx.network.add_slice(
+                    input_trt_shape, [i], [1], [1]).get_output(0)
 
-        if input_dim >= len(input_trt.shape):
-            break
-
-        input_size = int(input_trt.shape[input_dim])
 
         if isinstance(s, slice):
             start, size, stride = slice_to_trt(input_size, s)
             starts.append(start)
             sizes.append(size)
             strides.append(stride)
-            input_dim += 1
-
         elif isinstance(s, int):
             starts.append(s)
             sizes.append(1)
             strides.append(1)
-            input_dim += 1
+        else:
+            raise ValueError("Invalid slice")
+    starts, sizes, strides = dynamify_slices(starts,sizes,strides)
+
+    # print("starts,sizes,strides:", starts, sizes, strides)
+    assert len(starts) == len(sizes) == len(strides) == len(new_slices) == len(input_trt.shape)
 
     output_trt = ctx.network.add_slice(input_trt, starts, sizes, strides).get_output(0)
+    # print("shape after step3:", output_trt.shape)
+    assert len(output_trt.shape) >= 0, "Shape Error"  # getitem is prone to these
 
     # Step 4 - Add shuffle layer to insert dimensions for 'None' slices and remove dimensions for 'int' slices
 
-    num_non_slice = len([s for s in new_slices if not isinstance(s, slice)])
-    if num_non_slice > 0:
+    # num_non_slice = len([s for s in new_slices if not isinstance(s, slice)])
+    if tuple(output_trt.shape) != tuple(output.shape):
         layer = ctx.network.add_shuffle(output_trt)
+        # print("reshape to:", output.shape)
         layer.reshape_dims = tuple(output.shape)  # don't exclude batch
         output_trt = layer.get_output(0)
 
     output._trt = output_trt
-    assert len(output_trt.shape) >= 0
+    assert len(output_trt.shape) >= 0, "Shape Error"
 
 
 class LambdaModule(torch.nn.Module):

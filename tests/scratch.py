@@ -6,24 +6,29 @@ from gpt2 import GPT2Config, GPT2LMHeadModel
 torch.manual_seed(0)
 config = GPT2Config(n_layer=1, n_head=1, n_embd=3, vocab_size=10)
 model = GPT2LMHeadModel(config)
-input_names = ["input_ids", "past"]
+past_dummy_shape = (1, config.n_head, 1, config.n_embd)
+past_prof = [(x, x, x) for x in past_dummy_shape]
+past_prof[-2] = (0, 256, 1024)
 
-# (batch_size, sequence_length), (batch_size, num_layers, 2, num_heads, sequence_length, embed_size_per_head)
-input_shapes = [(1, -1), (1, config.n_layer, 2, config.n_head, -1, config.n_embd)]
-
-inputs = []
-inputs.append(torch.zeros((1, 1), dtype=torch.int32))
-inputs.append(torch.zeros(tuple(x if x != -1 else 1 for x in input_shapes[1])))
-
+input_names = ["input_ids"]
+input_shapes = [(1, -1)]
+inputs = [torch.zeros((1, 1), dtype=torch.int32)]
 opt_profile = {}
 opt_profile["input_ids"] = [(x, x, x) for x in inputs[0].shape]
 opt_profile["input_ids"][-1] = (1, 1, 1024)
-opt_profile["past"] = [(x, x, x) for x in inputs[1].shape]
-opt_profile["past"][-2] = (0, 256, 1024)
+for kv in "kv":
+    for layer_idx in range(config.n_layer):
+        input_name = f"past_{layer_idx}_{kv}"
+        input_names.append(input_name)
+        input_shapes.append((1, config.n_head, -1, config.n_embd))
+        inputs.append(torch.zeros(past_dummy_shape))
+        opt_profile[input_name] = past_prof
+
+# (batch_size, sequence_length), (batch_size, num_layers, 2, num_heads, sequence_length, embed_size_per_head)
 
 with torch.no_grad():
     # probs, pasts = model(input_ids=inputs[0].to(torch.long), past=inputs[1].transpose(0, 1).transpose(1, 2))
-    probs, pasts = model(input_ids=inputs[0], past=inputs[1])
+    probs, pasts = model(**{name: value for name, value in zip(input_names, inputs)})
     print(probs, pasts)
     # print(inputs[0].shape,inputs[1].shape)
     flags = (1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
