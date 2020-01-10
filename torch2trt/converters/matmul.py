@@ -2,16 +2,26 @@ from torch2trt.torch2trt import *
 from torch2trt.module_test import add_module_test
 
 
+def _matmul(ctx, mat1_trt, mat2_trt):
+    op1, op2 = trt.MatrixOperation.NONE, trt.MatrixOperation.NONE
+    if len(mat1_trt.shape) < len(mat2_trt.shape):
+        op1 = trt.MatrixOperation.VECTOR
+    elif len(mat1_trt.shape) > len(mat2_trt.shape):
+        op2 = trt.MatrixOperation.VECTOR
+
+    m1m2_trt = ctx.network.add_matrix_multiply(mat1_trt, op1, mat2_trt, op2).get_output(0)
+    return m1m2_trt
+
+
 @tensorrt_converter('torch.matmul')
 @tensorrt_converter('torch.Tensor.matmul')
 def convert_matmul(ctx):
-    input_a = ctx.method_args[0]
-    input_b = ctx.method_args[1]
-    input_a_trt = trt_(ctx.network, input_a)
-    input_b_trt = trt_(ctx.network, input_b)
+    mat1 = ctx.method_args[0]
+    mat2 = ctx.method_args[1]
+    mat1_trt = trt_(ctx.network, mat1)
+    mat2_trt = trt_(ctx.network, mat2)
     output = ctx.method_return
-    layer = ctx.network.add_matrix_multiply(input_a_trt, input_b_trt)
-    output._trt = layer.get_output(0)
+    output._trt = _matmul(ctx, mat1_trt, mat2_trt)
 
 
 @tensorrt_converter('torch.addmm')
@@ -24,8 +34,8 @@ def convert_addmm(ctx):
     input_trt = trt_(ctx.network, input)
     mat1_trt = trt_(ctx.network, mat1)
     mat2_trt = trt_(ctx.network, mat2)
-    m1m2 = ctx.network.add_matrix_multiply(mat1_trt, mat2_trt).get_output(0)
-    layer = ctx.network.add_elementwise(m1m2, input_trt, trt.ElementWiseOperation.SUM)
+    m1m2_trt = _matmul(ctx, mat1_trt, mat2_trt)
+    layer = ctx.network.add_elementwise(m1m2_trt, input_trt, trt.ElementWiseOperation.SUM)
     output._trt = layer.get_output(0)
 
 
