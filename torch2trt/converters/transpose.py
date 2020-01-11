@@ -10,7 +10,7 @@ def convert_transpose(ctx):
     output = ctx.method_return
     # permutation -1 because TRT does not include batch dim
     permutation = list(range(len(input.shape) - 1))
-    dim0 = get_arg(ctx, "dim0", 1, None)t
+    dim0 = get_arg(ctx, "dim0", 1, None)
     dim1 = get_arg(ctx, "dim1", 2, None)
 
     ndim = len(input_trt.shape)
