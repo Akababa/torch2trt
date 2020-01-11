@@ -1,4 +1,4 @@
-from torch2trt.torch2trt import *
+from ..conversion_context import *
 from .AdaptiveAvgPool2d import *
 
 

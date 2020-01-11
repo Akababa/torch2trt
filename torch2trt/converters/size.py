@@ -1,4 +1,4 @@
-from torch2trt.torch2trt import *
+from ..conversion_context import *
 
 
 # not included
@@ -12,7 +12,7 @@ def convert_shape(ctx):
 def convert_size(ctx):
     print("Tensor.shape is static, Tensor.size() is dynamic")
     input = ctx.method_args[0]
-    input_trt = trt_(ctx.network, input)
+    input_trt = ctx.get_trt_tensor(input)
     output = ctx.method_return
     output._trt = ctx.network.add_shape(input_trt).get_output(0)
     assert len(output._trt.shape) >= 0
@@ -26,7 +26,7 @@ def dont_warn(ctx):
 # def dont_warn(ctx):
 #     print("Tensor.ndim is static, Tensor.dim() is dynamic")
 #     input = ctx.method_args[0]
-#     input_trt = trt_(ctx.network, input)
+#     input_trt = ctx.get_trt_tensor(input)
 #     output = ctx.method_return
 #     output._trt = ctx.network.add_shape(input_trt).get_output(0)
 #     assert len(output._trt.shape) >= 0

@@ -1,20 +1,20 @@
-from torch2trt.torch2trt import *
+from ..conversion_context import *
 from torch2trt.module_test import add_module_test
 
 
 @tensorrt_converter('torch.mean')
 @tensorrt_converter('torch.Tensor.mean')
-def convert_mean(ctx):
+def convert_mean(ctx: ConversionContext):
     input = ctx.method_args[0]
-    input_trt = trt_(ctx.network, input)
+    input_trt = ctx.get_trt_tensor(input)
     output = ctx.method_return
 
-    dim = get_dim_to_trt_axes(ctx)
+    dim = ctx.get_trt_dim()
 
     # get whether to keep dimensions
-    keepdim = get_arg(ctx, 'keepdim', pos=2, default=False)
+    keepdim = ctx.get_arg('keepdim', pos=2, default=False)
 
-    layer = ctx.network.add_reduce(input_trt, trt.ReduceOperation.AVG, torch_dim_to_trt_axes(dim), keepdim)
+    layer = ctx.network.add_reduce(input_trt, trt.ReduceOperation.AVG, ctx.get_trt_axes(dim), keepdim)
     output._trt = layer.get_output(0)
 
 

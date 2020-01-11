@@ -1,4 +1,4 @@
-from torch2trt.torch2trt import *
+from ..conversion_context import *
 from torch2trt.module_test import add_module_test
 
 
@@ -6,7 +6,7 @@ from torch2trt.module_test import add_module_test
 @tensorrt_converter('torch.sigmoid')
 def convert_sigmoid(ctx):
     input = ctx.method_args[0]
-    input_trt = trt_(ctx.network, input)
+    input_trt = ctx.get_trt_tensor(input)
     output = ctx.method_return
     
     layer = ctx.network.add_activation(input_trt, trt.ActivationType.SIGMOID)

@@ -1,6 +1,6 @@
 import tensorrt as trt
 import torch.nn.functional as F
-from torch2trt.torch2trt import *
+from ..conversion_context import *
 from torch2trt.module_test import add_module_test
 from .interpolate_pb2 import interpolate_Message
 import torch.nn as nn 
@@ -16,16 +16,16 @@ def get_interpolate_plugin(size, mode, align_corners):
 @tensorrt_converter('torch.nn.functional.interpolate')
 def convert_interpolate(ctx):
     input = ctx.method_args[0]
-    input_trt = trt_(ctx.network, input)
+    input_trt = ctx.get_trt_tensor(input)
     output = ctx.method_return
 
     try:
-        mode = get_arg(ctx, 'mode', pos=3, default='nearest')
+        mode = ctx.get_arg('mode', pos=3, default='nearest')
     except KeyError:
         mode = 'nearest'
 
     try:
-        align_corners = get_arg(ctx, 'align_corners', pos=4, default=None)
+        align_corners = ctx.get_arg('align_corners', pos=4, default=None)
     except KeyError:
         align_corners = False
 

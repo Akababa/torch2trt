@@ -1,4 +1,4 @@
-from torch2trt.torch2trt import *
+from ..conversion_context import *
 from torch2trt.module_test import add_module_test
 
 
@@ -8,7 +8,7 @@ def convert_AdaptiveAvgPool2d(ctx):
     input = ctx.method_args[1]
     output = ctx.method_return
     
-    input_trt = trt_(ctx.network, input)
+    input_trt = ctx.get_trt_tensor(input)
 
     output_size = module.output_size
     if not isinstance(output_size, tuple):

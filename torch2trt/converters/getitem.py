@@ -1,4 +1,4 @@
-from torch2trt.torch2trt import *
+from ..conversion_context import *
 from torch2trt.module_test import add_module_test
 
 
@@ -44,7 +44,7 @@ def convert_tensor_getitem(ctx: ConversionContext):
         slices = (slices,)
     output = ctx.method_return
 
-    input_trt = trt_(ctx.network, input)  # may or may not have a batch dim
+    input_trt = ctx.get_trt_tensor(input)  # may or may not have a batch dim
     is_const = len(input_trt.shape) == input.dim()  # Only constant tensors have the batch axis
 
     # Step 1 - Replace ellipsis with expanded slices
@@ -76,7 +76,7 @@ def convert_tensor_getitem(ctx: ConversionContext):
 
     if not is_const:
         if new_slices[0] != slice(None, None, None):
-            raise ValueError(f"can't slice on batch dimension")
+            raise ValueError(f"can't slice on batch dimension")  # TODO actually I can in explicit mode
         new_slices = new_slices[1:]
         # print("new_slices shrink to:", new_slices)
         assert len(new_slices) == len(input_trt.shape)
@@ -95,7 +95,6 @@ def convert_tensor_getitem(ctx: ConversionContext):
                 # dynamic input size - only support full slices for now
                 input_size = ctx.network.add_slice(
                     input_trt_shape, [i], [1], [1]).get_output(0)
-
 
         if isinstance(s, slice):
             start, size, stride = slice_to_trt(input_size, s)

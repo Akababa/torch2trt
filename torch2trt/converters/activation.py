@@ -1,4 +1,4 @@
-from torch2trt.torch2trt import *
+from ..conversion_context import *
 from torch2trt.module_test import add_module_test
 from .unary import UnaryModule
 
@@ -14,11 +14,11 @@ from .unary import UnaryModule
 @tensorrt_converter('torch.nn.functional.leaky_relu')
 @tensorrt_converter('torch.nn.functional.leaky_relu_')
 def convert_leaky_relu(ctx):
-    input = get_arg(ctx, 'input', pos=0, default=None)
-    negative_slope = get_arg(ctx, 'negative_slope', pos=1, default=0.01)
+    input = ctx.get_arg('input', pos=0, default=None)
+    negative_slope = ctx.get_arg('negative_slope', pos=1, default=0.01)
     output = ctx.method_return
     
-    input_trt = trt_(ctx.network, input)
+    input_trt = ctx.get_trt_tensor(input)
     layer = ctx.network.add_activation(input_trt, trt.ActivationType.LEAKY_RELU)
     layer.alpha = negative_slope
     
@@ -36,11 +36,11 @@ def test_leaky_relu():
 @tensorrt_converter('torch.nn.functional.elu')
 @tensorrt_converter('torch.nn.functional.elu_')
 def convert_elu(ctx):
-    input = get_arg(ctx, 'input', pos=0, default=None)
-    alpha = get_arg(ctx, 'alpha', pos=1, default=1.0)
+    input = ctx.get_arg('input', pos=0, default=None)
+    alpha = ctx.get_arg('alpha', pos=1, default=1.0)
     output = ctx.method_return
     
-    input_trt = trt_(ctx.network, input)
+    input_trt = ctx.get_trt_tensor(input)
     layer = ctx.network.add_activation(input_trt, trt.ActivationType.ELU)
     layer.alpha = alpha
     
@@ -59,11 +59,11 @@ def test_elu():
 @tensorrt_converter('torch.nn.functional.selu')
 @tensorrt_converter('torch.nn.functional.selu_')
 def convert_selu(ctx):
-    input = get_arg(ctx, 'input', pos=0, default=None)
-    alpha = get_arg(ctx, 'alpha', pos=1, default=1.0)
+    input = ctx.get_arg('input', pos=0, default=None)
+    alpha = ctx.get_arg('alpha', pos=1, default=1.0)
     output = ctx.method_return
     
-    input_trt = trt_(ctx.network, input)
+    input_trt = ctx.get_trt_tensor(input)
     layer = ctx.network.add_activation(input_trt, trt.ActivationType.SELU)
     layer.alpha = 1.6732632423543772848170429916717
     layer.beta = 1.0507009873554804934193349852946
@@ -81,10 +81,10 @@ def test_selu():
 
 @tensorrt_converter('torch.nn.functional.softsign')
 def convert_softsign(ctx):
-    input = get_arg(ctx, 'input', pos=0, default=None)
+    input = ctx.get_arg('input', pos=0, default=None)
     output = ctx.method_return
     
-    input_trt = trt_(ctx.network, input)
+    input_trt = ctx.get_trt_tensor(input)
     layer = ctx.network.add_activation(input_trt, trt.ActivationType.SOFTSIGN)
     
     output._trt = layer.get_output(0)
@@ -100,10 +100,10 @@ def test_softsign():
 
 @tensorrt_converter('torch.nn.functional.softplus')
 def convert_softplus(ctx):
-    input = get_arg(ctx, 'input', pos=0, default=None)
+    input = ctx.get_arg('input', pos=0, default=None)
     output = ctx.method_return
     
-    input_trt = trt_(ctx.network, input)
+    input_trt = ctx.get_trt_tensor(input)
     layer = ctx.network.add_activation(input_trt, trt.ActivationType.SOFTPLUS)
     
     output._trt = layer.get_output(0)

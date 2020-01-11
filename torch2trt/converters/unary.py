@@ -1,10 +1,10 @@
-from torch2trt.torch2trt import *
+from ..conversion_context import *
 from torch2trt.module_test import add_module_test
 
         
 def __convert_unary(ctx, op):
-    input = get_arg(ctx, 'input', pos=0, default=None)
-    input_trt = trt_(ctx.network, input)
+    input = ctx.get_arg('input', pos=0, default=None)
+    input_trt = ctx.get_trt_tensor(input)
     output = ctx.method_return
     layer = ctx.network.add_unary(input_trt, op)
     output._trt = layer.get_output(0)

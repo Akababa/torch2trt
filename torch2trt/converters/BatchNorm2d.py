@@ -1,11 +1,11 @@
-from torch2trt.torch2trt import *
+from ..conversion_context import *
 
 
 @tensorrt_converter('torch.nn.BatchNorm2d.forward')
 def convert_BatchNorm2d(ctx):
     module = ctx.method_args[0]
     input = ctx.method_args[1]
-    input_trt = trt_(ctx.network, input)
+    input_trt = ctx.get_trt_tensor(input)
     output = ctx.method_return
     
     scale = module.weight.detach().cpu().numpy() / np.sqrt(module.running_var.detach().cpu().numpy() + module.eps)

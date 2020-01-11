@@ -1,24 +1,24 @@
-from torch2trt.torch2trt import *
+from ..conversion_context import *
 from torch2trt.module_test import add_module_test
 from .unary import UnaryModule
-    
+
 
 @tensorrt_converter('torch.prod')
 @tensorrt_converter('torch.Tensor.prod')
-def convert_prod(ctx):
+def convert_prod(ctx: ConversionContext):
     input = ctx.method_args[0]
-    dim = get_arg(ctx, 'dim', pos=1, default=tuple(range(1, input.ndim)))
-    keepdim = get_arg(ctx, 'keepdim', pos=2, default=False)
-    input_trt= trt_(ctx.network, input)
+    dim = ctx.get_trt_dim(pos=1, default="_all")
+    keepdim = ctx.get_arg('keepdim', pos=2, default=False)
+    input_trt = ctx.get_trt_tensor(input)
     output = ctx.method_return
-    layer = ctx.network.add_reduce(input_trt,  trt.ReduceOperation.PROD, torch_dim_to_trt_axes(dim), keepdim)
+    layer = ctx.network.add_reduce(input_trt, trt.ReduceOperation.PROD, ctx.get_trt_axes(trt_dim=dim), keepdim)
     output._trt = layer.get_output(0)
-        
-        
+
+
 @add_module_test(torch.float32, torch.device('cuda'), [(1, 3)])
 @add_module_test(torch.float32, torch.device('cuda'), [(1, 3, 3)])
 def test_prod_reduce_all():
-    return UnaryModule(lambda x: torch.prod(x))     
+    return UnaryModule(lambda x: torch.prod(x))
 
 
 @add_module_test(torch.float32, torch.device('cuda'), [(1, 3)])

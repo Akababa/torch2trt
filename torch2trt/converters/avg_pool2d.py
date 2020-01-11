@@ -1,19 +1,19 @@
-from torch2trt.torch2trt import *
+from ..conversion_context import *
 from torch2trt.module_test import add_module_test
 
 
 @tensorrt_converter('torch.nn.functional.avg_pool2d')
 def convert_avg_pool2d(ctx):
     # parse args
-    input = get_arg(ctx, 'input', pos=0, default=None)
-    kernel_size = get_arg(ctx, 'kernel_size', pos=1, default=None)
-    stride = get_arg(ctx, 'stride', pos=2, default=None)
-    padding = get_arg(ctx, 'padding', pos=3, default=0)
-    ceil_mode = get_arg(ctx, 'ceil_mode', pos=4, default=False)
-    count_include_pad = get_arg(ctx, 'count_include_pad', pos=5, default=True)
+    input = ctx.get_arg('input', pos=0, default=None)
+    kernel_size = ctx.get_arg('kernel_size', pos=1, default=None)
+    stride = ctx.get_arg('stride', pos=2, default=None)
+    padding = ctx.get_arg('padding', pos=3, default=0)
+    ceil_mode = ctx.get_arg('ceil_mode', pos=4, default=False)
+    count_include_pad = ctx.get_arg('count_include_pad', pos=5, default=True)
     
     # get input trt tensor (or create constant if it doesn't exist)
-    input_trt = trt_(ctx.network, input)
+    input_trt = ctx.get_trt_tensor(input)
     
     output = ctx.method_return
 

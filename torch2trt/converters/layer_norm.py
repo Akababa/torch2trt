@@ -1,25 +1,25 @@
-from torch2trt.torch2trt import *
+from ..conversion_context import *
 from torch2trt.module_test import add_module_test
 
 
 # TODO debug this
 @tensorrt_converter('torch.layer_norm')
 @tensorrt_converter('torch.nn.functional.layer_norm')
-def convert_layer_norm(ctx):
+def convert_layer_norm(ctx: ConversionContext):
     # TODO Optimize this
-    input = get_arg(ctx, 'input', pos=0, default=None)
-    normalized_shape = get_arg(ctx, 'normalized_shape', pos=1, default=None)
-    weight = get_arg(ctx, 'weight', pos=2, default=None)
-    bias = get_arg(ctx, 'bias', pos=3, default=None)
-    eps = get_arg(ctx, 'eps', pos=4, default=1e-05)
-    # elementwise_affine = get_arg(ctx, 'elementwise_affine', pos=20, default=1e-05)
+    input = ctx.get_arg('input', pos=0, default=None)
+    normalized_shape = ctx.get_arg('normalized_shape', pos=1, default=None)
+    weight = ctx.get_arg('weight', pos=2, default=None)
+    bias = ctx.get_arg('bias', pos=3, default=None)
+    eps = ctx.get_arg('eps', pos=4, default=1e-05)
+    # elementwise_affine = ctx.get_arg('elementwise_affine', pos=20, default=1e-05)
     output = ctx.method_return
     # print(input.shape, weight.shape, bias.shape)
-    input_trt, weight_trt, bias_trt = trt_(ctx.network, input, weight, bias)
+    input_trt, weight_trt, bias_trt = ctx.get_trt_tensor(input, weight, bias)
+    # print(input_trt.shape, weight_trt.shape, bias_trt.shape)
 
     keep_dims = True
-    input_ndim = input.ndim
-    reduce_axes = torch_dim_to_trt_axes(tuple(range(- len(normalized_shape), 0)), ndim=input_ndim)
+    reduce_axes = ctx.get_trt_axes(torch_dim=tuple(range(-len(normalized_shape), 0)))
 
     # compute mean over spatial
     mean_trt = ctx.network.add_reduce(input_trt, trt.ReduceOperation.AVG, reduce_axes, keep_dims).get_output(0)

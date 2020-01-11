@@ -1,4 +1,4 @@
-from torch2trt.torch2trt import *
+from ..conversion_context import *
 from torch2trt.module_test import add_module_test
 
 
@@ -20,7 +20,7 @@ def __add_clamp(network, trt_input, val, op):
 @tensorrt_converter('torch.Tensor.clamp_min')
 def convert_clamp_min(ctx):
     input = ctx.method_args[0]
-    input_trt = trt_(ctx.network, input)
+    input_trt = ctx.get_trt_tensor(input)
     val = ctx.method_args[1]
     output = ctx.method_return
     

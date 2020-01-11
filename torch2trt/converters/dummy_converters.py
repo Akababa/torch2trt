@@ -1,5 +1,5 @@
-from torch2trt.torch2trt import *
-
+import torch
+from ..conversion_context import *
 
 def is_private(method):
     method = method.split('.')[-1]  # remove prefix

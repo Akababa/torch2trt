@@ -110,7 +110,7 @@ class Attention(nn.Module):
 
         return torch.matmul(w, v)
 
-    def merge_heads(self, x):
+    def merge_heads(self, x: torch.Tensor):
         x = x.permute(0, 2, 1, 3).contiguous()
         new_x_shape = x.size()[:-2] + (x.size(-2) * x.size(-1),)
         return x.view(*new_x_shape)  # in Tensorflow implem: fct merge_states
@@ -237,7 +237,7 @@ class GPT2Model(GPT2PreTrainedModel):
         batch_size, input_len = input_ids.size()
         past_length = past[0][0].size(-2)  # TODO make this dynamic
 
-        position_embeds = self.wpe.weight[past_length:past_length + input_len].unsqueeze(0)  # put in the batch
+        position_embeds = self.wpe.weight.data[past_length:past_length + input_len].unsqueeze(0)  # put in the batch
         print(position_embeds.device)
 
         inputs_embeds = self.wte(input_ids.to(torch.long))

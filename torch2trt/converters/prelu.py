@@ -1,17 +1,17 @@
-from torch2trt.torch2trt import *
+from ..conversion_context import *
 from torch2trt.module_test import add_module_test
 
 
 @tensorrt_converter('torch.nn.functional.prelu')
 def convert_prelu(ctx):
-    input = get_arg(ctx, 'input', pos=0, default=None)
-    weight = get_arg(ctx, 'weight', pos=1, default=None)
+    input = ctx.get_arg('input', pos=0, default=None)
+    weight = ctx.get_arg('weight', pos=1, default=None)
     output = ctx.method_return
     
     weight_shape = [1] * (len(input.shape) - 1)
     weight_shape[0] = weight.numel()
     
-    input_trt = trt_(ctx.network, input)
+    input_trt = ctx.get_trt_tensor(input)
     
    
     # y = prelu(x) = relu(x) - alpha * relu(-x)

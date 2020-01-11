@@ -1,3 +1,4 @@
+# Mock for tensorrt, like pycharm stubs
 from enum import Enum
 from typing import Callable
 
@@ -42,14 +43,19 @@ class INetworkDefinition:
             def add_layer(*inputs, **kwargs):
                 layer = ILayer()
                 layer.inputs = inputs + tuple(kwargs.values())
-                if name[4:] in ("elementwise", "scale"):
+                layer_name = name[4:]
+                if layer_name in ("elementwise", "scale"):
                     layer.output_shape = inputs[0].shape
+                elif layer_name in ("constant",):
+                    layer.output_shape = inputs[1].shape
                 else:
                     try:
                         layer.output_shape = inputs[0].shape
-                        layer.output_shape = kwargs["inputs"][0].shape
                     except:
-                        pass
+                        try:
+                            layer.output_shape = kwargs["inputs"][0].shape
+                        except:
+                            pass
                 return layer
 
             return add_layer

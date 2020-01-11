@@ -1,10 +1,10 @@
-from torch2trt.torch2trt import *
+from ..conversion_context import *
 
 
 @tensorrt_converter('torch.Tensor.__iter__')
 def convert_iter(ctx: ConversionContext):
     input = ctx.method_args[0]
-    input_trt = trt_(ctx.network, input)
+    input_trt = ctx.get_trt_tensor(input)
     output = ctx.method_return
 
     loop = ctx.network.add_loop()
