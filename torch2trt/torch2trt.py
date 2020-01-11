@@ -68,31 +68,30 @@ def trt_num_outputs(engine):
     return count
 
 
-def get_dim_to_trt_axes(ctx, only_one=False):
+def get_dim_to_trt_axes(ctx):
     ndim = ctx.method_args[0].dim()
     dim = get_arg(ctx, 'dim', pos=1, default=range(1, ndim))
-
-    axes = torch_dim_to_trt_axes(dim, ndim, only_one=only_one)
+    axes = torch_dim_to_trt_axes(dim, ndim)
     return axes
 
 
-def torch_dim_to_trt_axes(dim, ndim=None, only_one=False):
+def fix_dim(dim, ndim):
+    # handles negative index
+    return ndim + dim if dim < 0 else dim
+
+
+def torch_dim_to_trt_axes(dim, ndim=None):
     """Converts torch dim, or tuple of dims to a tensorrt axes bitmask"""
     if isinstance(dim, list):
         dim = tuple(dim)
     if not isinstance(dim, tuple):
         dim = (dim,)
-    if only_one:
-        assert len(dim) == 1
+
     # create axes bitmask for reduce layer
     axes = 0
     for d in dim:
-        if d < 0:
-            assert ndim is not None
-            d = ndim + d
+        d = fix_dim(d, ndim)
         assert d >= 1
-        if only_one:
-            return d - 1
         axes |= 1 << (d - 1)  # -1 to remove batch dimension
 
     return axes
@@ -125,9 +124,7 @@ def trt_(network, *tensors):
      while pytorch tensors have the first batch dim (explicit)
     """
     trt_tensors = [None] * len(tensors)
-
     dtype = check_torch_dtype(*tensors)
-
     # get broadcast dimension
     broadcast_num_dim = 1  # 0 dim doesn't exist
     for t in tensors:
@@ -307,6 +304,19 @@ class ConversionContext(object):
             trt_tensor.location = torch_device_to_trt(torch_output.device)
             trt_tensor.dtype = torch_dtype_to_trt(torch_output.dtype)
             self.network.mark_output(trt_tensor)
+
+    def has_implicit_batch(self) -> bool:
+        return self.network.has_implicit_batch_dimension
+
+    def get_arg(self, name, pos, default=None):
+        if name in self.method_kwargs:
+            return self.method_kwargs[name]
+        elif len(self.method_args) > pos:
+            return self.method_args[pos]
+        elif default is not None:
+            return default
+        else:
+            raise ValueError(f"Missing arg {name} at pos {pos}")
 
 
 class TRTModule(torch.nn.Module):

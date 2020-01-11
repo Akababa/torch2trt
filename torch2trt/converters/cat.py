@@ -5,7 +5,8 @@ from torch2trt.torch2trt import *
 def convert_cat(ctx: ConversionContext):
     inputs = ctx.method_args[0]
 
-    axis = get_dim_to_trt_axes(ctx, only_one=True)
+    dim = get_arg(ctx, "dim", 1, default=1)
+    axis = fix_dim(dim, ndim=inputs[0].dim())
 
     output = ctx.method_return
     trt_inputs = [trt_(ctx.network, i) for i in inputs]
@@ -20,7 +21,7 @@ def convert_cat(ctx: ConversionContext):
     inputs = ctx.method_args[0]
 
     dim = get_arg(ctx, "dim", 1, default=1)
-    axis = torch_dim_to_trt_axes(dim, ndim=inputs[0].dim() + 1, only_one=True)
+    axis = fix_dim(dim, ndim=inputs[0].dim() + 1)
 
     output = ctx.method_return
     rshape = list(output.shape[1:])

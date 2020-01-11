@@ -10,8 +10,12 @@ def convert_transpose(ctx):
     output = ctx.method_return
     # permutation -1 because TRT does not include batch dim
     permutation = list(range(len(input.shape) - 1))
-    dim0 = ctx.method_args[1] - 1
-    dim1 = ctx.method_args[2] - 1
+    dim0 = get_arg(ctx, "dim0", 1, None)t
+    dim1 = get_arg(ctx, "dim1", 2, None)
+
+    ndim = len(input_trt.shape)
+    dim0 = fix_dim(dim0, ndim=ndim) - 1
+    dim1 = fix_dim(dim1, ndim=ndim) - 1
     permutation[dim0] = dim1
     permutation[dim1] = dim0
     layer = ctx.network.add_shuffle(input_trt)
@@ -24,6 +28,7 @@ class Transpose(torch.nn.Module):
         super(Transpose, self).__init__()
         self.dim0 = dim0
         self.dim1 = dim1
+
     def forward(self, x):
         return torch.transpose(x, self.dim0, self.dim1).contiguous()
 
