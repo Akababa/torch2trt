@@ -149,7 +149,7 @@ class ConversionContext(object):
 
     def get_trt_axes(self, *, trt_dim=__default, torch_dim=__default):
         # Returns an axes bitmask
-        assert sum(x is ConversionContext.__default for x in
+        assert sum(x is not ConversionContext.__default for x in
                    [trt_dim, torch_dim]) <= 1, "Can't have both trt_dim and torch_dim"
 
         if trt_dim is ConversionContext.__default:
@@ -310,7 +310,7 @@ def _attach_converter(ctx: ConversionContext, method, converter, method_str):
         if not skip:
             ctx.setup_method(args, kwargs, outputs, method_str)
 
-            #             print('%s' % (converter.__name__,))
+            print(f"Entering {method_str}")
             converter['converter'](ctx)
             if converter['is_real']:
                 def _check_shape_recursive(outputs_recurse, pos=()):
