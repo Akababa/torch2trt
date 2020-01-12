@@ -130,8 +130,9 @@ class ConversionContext(object):
         return trt_dim
 
     def trt_ndim(self) -> int:
-        ndim = len(self.first_input()._trt.shape)
-        assert ndim == self._to_trt_dim(self.first_input().dim())
+        fi = self.first_input()
+        ndim = len(fi._trt.shape)
+        assert ndim == self._to_trt_dim(fi.dim()), f"Mismatch torch {fi.shape} and trt {fi._trt.shape} dims"
         return ndim
 
     def input_has_implicit_batch(self):
