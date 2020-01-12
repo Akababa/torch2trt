@@ -46,7 +46,7 @@ def convert_layer_norm(ctx: ConversionContext):
 
     # compute sqrt(var + eps)
     var_trt = ctx.network.add_unary(var_trt, trt.UnaryOperation.SQRT).get_output(0)
-    print(var_trt.shape)
+    # print(var_trt.shape)
     assert len(var_trt.shape) >= 0
 
     # compute final result

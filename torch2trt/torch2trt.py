@@ -68,6 +68,7 @@ def torch2trt(module,
         config = builder.create_builder_config()
         profile = builder.create_optimization_profile()
         for name, shapelims in optimization_profile.items():
+            assert len(shapelims) == 3, "need min, opt, max for optimization profile shapes"
             profile.set_shape(name, *shapelims)
         config.add_optimization_profile(profile)
 
