@@ -313,21 +313,21 @@ def _attach_converter(ctx: ConversionContext, method, converter, method_str):
             #             print('%s' % (converter.__name__,))
             converter['converter'](ctx)
             if converter['is_real']:
-                def _check_shape_recursive(outputs_, pos=()):
+                def _check_shape_recursive(outputs_recurse, pos=()):
                     # Checks for corrupted converter trt tensor outputs, since python api/abi doesn't do so
-                    if isinstance(outputs_, torch.Tensor):
-                        if hasattr(outputs_, "_trt"):
+                    if isinstance(outputs_recurse, torch.Tensor):
+                        if hasattr(outputs_recurse, "_trt"):
                             try:
-                                len(outputs._trt.shape)
+                                len(outputs_recurse._trt.shape)
                             except Exception as e:
                                 print(f"Error: bad shape on output {pos} of {method_str}"
-                                      f" (expected {tuple(outputs.shape)}")
+                                      f" (expected {tuple(outputs_recurse.shape)}")
                                 raise e
                         else:
                             print(f"Warning: output {pos} of {method_str} not supported")
                         return
-                    for i, output in enumerate(outputs_):
-                        _check_shape_recursive(output, pos + (i,))
+                    for i, output_i in enumerate(outputs_recurse):
+                        _check_shape_recursive(output_i, pos + (i,))
 
                 _check_shape_recursive(ctx.method_return)
 
