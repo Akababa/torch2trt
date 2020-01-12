@@ -15,10 +15,15 @@ def _check_torch_dtype(*tensors):
     dtype = None
     for t in tensors:
         if isinstance(t, torch.Tensor):
-            if dtype is None:
-                dtype = t.dtype
-            else:
-                assert (dtype == t.dtype)  # , 'Tensor data types must match')
+            tdtype = t.dtype
+        elif isinstance(t, trt.ITensor):
+            tdtype = torch_dtype_to_trt(t.dtype)
+        else:
+            continue
+        if dtype is None:
+            dtype = tdtype
+        else:
+            assert (dtype == tdtype), 'Tensor data types must match'
     # assert (dtype is not None)  # , 'Data type could not be inferred from any item in list')
     if dtype is None and len(tensors) == 1:
         dtype = torch.float32 if isinstance(tensors[0], float) else torch.int32
@@ -50,7 +55,6 @@ class ConversionContext(object):
         TRT tensors are missing batch dimension (implicit) EXCEPT for CONSTANTS,
          while pytorch tensors have the first batch dim (explicit)
         """
-        # broadcast = len(tensors) > 1
         dtype = _check_torch_dtype(*tensors)
         # get broadcast dimension
         broadcast_num_dim = 0  # 0 dim DOES exist!!
@@ -60,46 +64,41 @@ class ConversionContext(object):
                     num_dim = len(t.shape)  # don't exclude batch for constants
                 else:  # It's a variable (on input path)
                     num_dim = len(t._trt.shape)  # non-leaf tensors must already have _trt, get shape from that
-                if num_dim > broadcast_num_dim:
-                    broadcast_num_dim = num_dim
+            elif isinstance(t, trt.ITensor):
+                num_dim = len(t.shape)
+            else:
+                continue
+            broadcast_num_dim = max(broadcast_num_dim, num_dim)
+
+        #  convert to list of trt.ITensor
         trt_tensors = []
         for i, t in enumerate(tensors):
             # GET TRT TENSOR (OR CREATE TRT CONSTANT)
-
             # get tensor w/ _trt
             if isinstance(t, torch.Tensor) and hasattr(t, '_trt'):
                 trt_tensor = t._trt
                 # trt_tensor._trt_const = False
-
+            elif isinstance(t, trt.ITensor):
+                trt_tensor = t
             # or... add constant for leaf tensor w/o _trt
             elif isinstance(t, torch.Tensor) and not hasattr(t, '_trt'):
-                # add leaf tensor
-                # don't exclude batch when adding constants...?
+                # add leaf tensor - don't exclude batch when adding constants...?
                 t._trt = self._add_const_trt(t)
                 trt_tensor = t._trt
                 # trt_tensor._trt_const = True
-
             # or... add constant for scalar primitive
             elif isinstance(t, float) or isinstance(t, int):
                 shape = (1,) * broadcast_num_dim
                 scalar = torch.full(shape, t, dtype=dtype)
                 trt_tensor = self._add_const_trt(scalar)
                 # trt_tensor._trt_const = True
+            else:
+                raise ValueError(f'Bad tensor of type {type(t)}')
 
-            # assert (trt_tensor is not None)
             assert len(trt_tensor.shape) >= 0
 
-            # MAKE TRT TENSOR BROADCASTABLE IF IT IS NOT ALREADY
-
-            if len(trt_tensor.shape) < broadcast_num_dim:
-                # append 1 size dims to front
-                diff = broadcast_num_dim - len(trt_tensor.shape)
-                shape = tuple([1] * diff + list(trt_tensor.shape))
-                layer = self.network.add_shuffle(trt_tensor)
-                layer.reshape_dims = shape
-                trt_tensor = layer.get_output(0)
-                assert len(trt_tensor.shape) >= 0
-
+            # MAKE TRT TENSOR BROADCASTABLE IF IT IS NOT ALREADY, and add to list
+            trt_tensor = self.make_broadcastable_to(trt_tensor, broadcast_num_dim)
             trt_tensors.append(trt_tensor)
 
         return trt_tensors[0] if len(trt_tensors) == 1 else tuple(trt_tensors)
@@ -172,6 +171,21 @@ class ConversionContext(object):
             axes |= (1 << d)  # don't -1 because it's already trt dim
 
         return axes
+
+    # If len(trt_tensor.shape) < len(shape), return a shuffled tensor to match number of dims in shape,
+    # otherwise returns trt_tensor
+    def make_broadcastable_to(self, trt_tensor, broadcast_num_dim):
+        trt_num_dims = len(trt_tensor.shape)
+        assert trt_num_dims <= broadcast_num_dim
+        if trt_num_dims < broadcast_num_dim:
+            # append 1 size dims to front
+            diff = broadcast_num_dim - trt_num_dims
+            shape = tuple([1] * diff + list(trt_tensor.shape))
+            layer = self.network.add_shuffle(trt_tensor)
+            layer.reshape_dims = shape
+            trt_tensor = layer.get_output(0)
+            assert len(trt_tensor.shape) >= 0
+        return trt_tensor
 
     def get_arg(self, name, pos, default=__default):
         if name in self.method_kwargs:
@@ -305,9 +319,10 @@ def _attach_converter(ctx: ConversionContext, method, converter, method_str):
                         if hasattr(outputs_, "_trt"):
                             try:
                                 len(outputs._trt.shape)
-                            except:
+                            except Exception as e:
                                 print(f"Error: bad shape on output {pos} of {method_str}"
                                       f" (expected {tuple(outputs.shape)}")
+                                raise e
                         else:
                             print(f"Warning: output {pos} of {method_str} not supported")
                         return

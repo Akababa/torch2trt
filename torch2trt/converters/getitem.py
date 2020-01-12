@@ -25,6 +25,7 @@ def num_slice_types(slices):
             num_slice += 1
     return num_slice
 
+
 # def list_to_itensor(ctx, lst):
 #     consts = ctx.network.add_constant([a if isinstance(a, int) else -1 for a in lst]).get_output(0)
 #     varias = ctx.network.add_constant([a if isinstance(a, int) else -1 for a in lst]).get_output(0)
@@ -87,7 +88,7 @@ def convert_tensor_getitem(ctx: ConversionContext):
     # Step 3 - Add slice layer (will currently ignore 'None' slices)
 
     starts, sizes, strides = [], [], []
-    input_trt_shape = ctx.network.add_shape(input_trt).get_output(0)
+    # input_trt_shape = ctx.network.add_shape(input_trt).get_output(0)
     for i, (s, input_size) in enumerate(zip(new_slices, input_trt.shape)):
         if input_size == -1:
             raise NotImplementedError("sorry no dynamic sizes")
