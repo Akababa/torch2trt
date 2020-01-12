@@ -9,8 +9,8 @@ def postfix_check_output(function):
     @functools.wraps(function)
     def run(*args, **kwargs):
         output = function(*args, **kwargs)
-        print(f"Ran {args[0].__class__.__name__}")
-        len(output.shape)
+        print(f"Added {args[0].__class__.__name__}, got output shape {output.shape}")
+        assert len(output.shape) >= 0
         return output
 
     return run

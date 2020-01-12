@@ -73,6 +73,7 @@ def torch2trt(module,
         config.add_optimization_profile(profile)
 
     engine = builder.build_cuda_engine(network)
+    assert engine is not None, "build_cuda_network failed"
 
     module_trt = TRTModule(engine, ctx.input_names, ctx.output_names)
 

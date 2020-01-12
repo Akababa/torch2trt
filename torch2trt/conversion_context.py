@@ -172,7 +172,7 @@ class ConversionContext(object):
 
         return axes
 
-    # If len(trt_tensor.shape) < len(shape), return a shuffled tensor to match number of dims in shape,
+    # If len(trt_tensor.shape) < broadcast_num_dim, prepends 1 dims to match number of dims in shape,
     # otherwise returns trt_tensor
     def make_broadcastable_to(self, trt_tensor, broadcast_num_dim):
         trt_num_dims = len(trt_tensor.shape)
@@ -310,7 +310,7 @@ def _attach_converter(ctx: ConversionContext, method, converter, method_str):
         if not skip:
             ctx.setup_method(args, kwargs, outputs, method_str)
 
-            print(f"Entering {method_str}")
+            print(f"Converting {method_str}...")
             converter['converter'](ctx)
             if converter['is_real']:
                 def _check_shape_recursive(outputs_recurse, pos=()):
@@ -330,6 +330,8 @@ def _attach_converter(ctx: ConversionContext, method, converter, method_str):
                         _check_shape_recursive(output_i, pos + (i,))
 
                 _check_shape_recursive(ctx.method_return)
+
+            print("...done")
 
             # convert to None so conversion will fail for unsupported layers
             ctx.cleanup_method()
