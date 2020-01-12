@@ -1,5 +1,22 @@
 import tensorrt as trt
 import torch
+import functools
+
+
+def postfix_check_output(function):
+    print(f"Overwrote {function}")
+
+    @functools.wraps(function)
+    def run(*args, **kwargs):
+        output = function(*args, **kwargs)
+        print(f"Ran {args[0].__class__.__name__}")
+        len(output.shape)
+        return output
+
+    return run
+
+
+trt.ILayer.get_output = postfix_check_output(trt.ILayer.get_output)
 
 
 def torch_dtype_to_trt(dtype):
@@ -44,5 +61,3 @@ def torch_device_from_trt(device):
         return torch.device('cpu')
     else:
         return TypeError('%s is not supported by torch' % device)
-
-
