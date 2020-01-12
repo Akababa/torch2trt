@@ -303,7 +303,11 @@ def _attach_converter(ctx: ConversionContext, method, converter, method_str):
                     # Checks for corrupted converter trt tensor outputs, since python api/abi doesn't do so
                     if isinstance(outputs_, torch.Tensor):
                         if hasattr(outputs_, "_trt"):
-                            assert len(outputs_._trt.shape) >= 0
+                            try:
+                                len(outputs._trt.shape)
+                            except:
+                                print(f"Error: bad shape on output {pos} of {method_str}"
+                                      f" (expected {tuple(outputs.shape)}")
                         else:
                             print(f"Warning: output {pos} of {method_str} not supported")
                         return
