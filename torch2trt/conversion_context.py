@@ -17,7 +17,7 @@ def _check_torch_dtype(*tensors):
         if isinstance(t, torch.Tensor):
             tdtype = t.dtype
         elif isinstance(t, trt.ITensor):
-            tdtype = torch_device_from_trt(t.dtype)
+            tdtype = torch_dtype_from_trt(t.dtype)
         else:
             continue
         if dtype is None:
