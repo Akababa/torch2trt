@@ -82,7 +82,7 @@ class Builder:
 
     def create_network(self, flags):
         inet = INetworkDefinition()
-        inet.has_implicit_batch_dimension = bool(flags & (1 << NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
+        inet.has_implicit_batch_dimension = not bool(flags & (1 << NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
         return inet
 
     def create_builder_config(self):

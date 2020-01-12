@@ -198,9 +198,12 @@ class ConversionContext(object):
 
         for i, torch_input in enumerate(torch_inputs):
             if not hasattr(torch_input, '_trt'):
+                shape = tuple(torch_input.shape if input_shapes is None else input_shapes[i])
+                if self.has_implicit_batch():
+                    shape = shape[1:]
                 trt_tensor = self.network.add_input(
                     name=names[i],
-                    shape=tuple(torch_input.shape if input_shapes is None else input_shapes[i])[1:],
+                    shape=shape,
                     dtype=torch_dtype_to_trt(torch_input.dtype),
                 )
                 trt_tensor.location = torch_device_to_trt(torch_input.device)
