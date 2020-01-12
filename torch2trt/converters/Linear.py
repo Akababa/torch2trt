@@ -26,7 +26,7 @@ def convert_Linear(ctx):
 
     # reshape back to N
     layer = ctx.network.add_shuffle(layer.get_output(0))
-    layer.reshape_dims = tuple(output.shape[1:])
+    layer.reshape_dims = tuple(output.shape[ctx.nonbatch_dim:])
 
     output._trt = layer.get_output(0)
 

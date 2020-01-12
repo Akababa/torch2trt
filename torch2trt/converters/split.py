@@ -16,14 +16,14 @@ def convert_split(ctx: ConversionContext):
 
     # assert(dim >= 1)
 
-    start = [0] * len(input.shape[ctx.nonbatch_idx:])  # exclude batch
+    start = [0] * len(input.shape[ctx.nonbatch_dim:])  # exclude batch
     # TODO: Fix constants
     stride = [1] * len(start)
     offset = 0
 
     # add slice layers
     for i, output in enumerate(outputs):
-        shape = list(output.shape[ctx.nonbatch_idx:])  # exclude batch dim
+        shape = list(output.shape[ctx.nonbatch_dim:])  # exclude batch dim
         start[trt_dim] = offset
         layer = ctx.network.add_slice(input_trt, start=start, shape=shape, stride=stride)
         output._trt = layer.get_output(0)

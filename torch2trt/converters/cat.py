@@ -23,7 +23,7 @@ def convert_cat(ctx: ConversionContext):
     output = ctx.method_return
 
     axis = dim if dim >= 0 else output.ndim() + dim
-    rshape = list(output.shape[1:]) if ctx.input_has_implicit_batch() else list(output.shape)
+    rshape = list(output.shape[ctx.nonbatch_dim:])
     rshape[axis] = 1
 
     trt_inputs = [ctx.get_trt_tensor(i) for i in inputs]

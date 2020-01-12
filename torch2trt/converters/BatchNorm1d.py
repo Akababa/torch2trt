@@ -3,7 +3,7 @@ from torch2trt.module_test import add_module_test
 
 
 @tensorrt_converter('torch.nn.BatchNorm1d.forward')
-def convert_BatchNorm2d(ctx):
+def convert_BatchNorm2d(ctx: ConversionContext):
     module = ctx.method_args[0]
     input = ctx.method_args[1]
     input_trt = ctx.get_trt_tensor(input)
@@ -17,15 +17,18 @@ def convert_BatchNorm2d(ctx):
     layer = ctx.network.add_shuffle(input_trt)
 
     if len(input.shape) == 2:
-        layer.reshape_dims = (input.shape[1], 1, 1)
+        reshape_dims = (input.shape[1], 1, 1)
     else:
-        layer.reshape_dims = (input.shape[1], input.shape[2], 1)
+        reshape_dims = (input.shape[1], input.shape[2], 1)
+    if ctx.has_implicit_batch():
+        reshape_dims = (input.shape[0],) + reshape_dims
+    layer.reshape_dims = reshape_dims
 
     layer = ctx.network.add_scale(layer.get_output(0), trt.ScaleMode.CHANNEL, bias, scale, power)
 
     # reshape back to 1D
     layer = ctx.network.add_shuffle(layer.get_output(0))
-    layer.reshape_dims = tuple(output.shape[1:])
+    layer.reshape_dims = tuple(output.shape[ctx.nonbatch_dim:])
 
     output._trt = layer.get_output(0)
 

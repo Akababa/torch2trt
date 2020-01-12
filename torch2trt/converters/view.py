@@ -7,12 +7,12 @@ from torch2trt.module_test import add_module_test
 @tensorrt_converter('torch.Tensor.view')
 @tensorrt_converter('torch.Tensor.squeeze')
 @tensorrt_converter('torch.Tensor.unsqueeze')
-def convert_view(ctx):
+def convert_view(ctx: ConversionContext):
     input = ctx.method_args[0]
     input_trt = ctx.get_trt_tensor(input)
     output = ctx.method_return
     layer = ctx.network.add_shuffle(input_trt)
-    layer.reshape_dims = tuple(output.shape[1:])  # TRT tensors have no batch dim (always implicit)
+    layer.reshape_dims = tuple(output.shape[ctx.nonbatch_dim:])  # TRT tensors have no batch dim (always implicit)
     output._trt = layer.get_output(0)
 
 

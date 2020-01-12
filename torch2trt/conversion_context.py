@@ -26,8 +26,8 @@ def _check_torch_dtype(*tensors):
     return dtype
 
 
-# TODO put constants with batch dim?
-
+# put constants with batch dim?
+# TODO FIX this by comparing dim sizes of input and input._trt!
 class ConversionContext(object):
     __default = object()  # dummy default
 
@@ -132,7 +132,7 @@ class ConversionContext(object):
     def trt_ndim(self) -> int:
         fi = self.first_input()
         ndim = len(fi._trt.shape)
-        assert ndim == self._to_trt_dim(fi.dim()), f"Mismatch torch {fi.shape} and trt {fi._trt.shape} dims"
+        assert ndim == self._to_trt_dim(fi.dim()), f"Mismatch torch {tuple(fi.shape)} and trt {fi._trt.shape} dims"
         return ndim
 
     def input_has_implicit_batch(self):
@@ -226,7 +226,7 @@ class ConversionContext(object):
         return self.network.has_implicit_batch_dimension
 
     @property
-    def nonbatch_idx(self):
+    def nonbatch_dim(self):
         return 1 if self.has_implicit_batch() else 0
 
     def _add_const_trt(self, tensor: torch.Tensor):
