@@ -56,9 +56,23 @@ class ConversionContext(object):
         assert len(trt_tensor.shape) >= 0
         return trt_tensor
 
+    def convert_dtype_to(self, tensor: trt.ITensor, dtype: trt.DataType):
+        assert isinstance(tensor, trt.ITensor) and isinstance(dtype, trt.DataType)
+        if tensor.dtype == dtype:
+            return tensor
+        layer = self.network.add_identity(tensor)
+        layer.set_output_type(0, dtype)
+        return layer.get_output(0)
+
     def broadcast_together(self, *tensors: trt.ITensor):
+        # Make same number of dims and dtype
         assert all(isinstance(t, trt.ITensor) for t in tensors)
-        assert len(set(t.dtype for t in tensors)) == 1
+        if len(set(t.dtype for t in tensors)) > 1:
+            types = [trt.int8, trt.int32, trt.float16, trt.float32]
+            max_type = types[max(types.index(t.dtype) for t in tensors)]
+            print(f"promoting {[t.dtype for t in tensors]} to {max_type}")  # TODO type promotion
+            tensors = [self.convert_dtype_to(t, max_type) for t in tensors]
+
         broadcast_num_dim = max(len(t.shape) for t in tensors)
         new_tensors = [self.make_broadcastable_to(t, broadcast_num_dim) for t in tensors]
         all_dims_set = [set(nt.shape[i] for nt in new_tensors) - {1, -1} for i in range(broadcast_num_dim)]

@@ -112,7 +112,6 @@ def convert_tensor_getitem(ctx: ConversionContext):
 
     output_trt = ctx.network.add_slice(input_trt, starts, sizes, strides).get_output(0)
     # print("shape after step3:", output_trt.shape)
-    assert len(output_trt.shape) >= 0, "Shape Error"  # getitem is prone to these
 
     # Step 4 - Add shuffle layer to insert dimensions for 'None' slices and remove dimensions for 'int' slices
 
@@ -124,7 +123,6 @@ def convert_tensor_getitem(ctx: ConversionContext):
         output_trt = layer.get_output(0)
 
     output._trt = output_trt
-    assert len(output_trt.shape) >= 0, "Shape Error"
 
 
 class LambdaModule(torch.nn.Module):

@@ -12,7 +12,6 @@ def _matmul(ctx, mat1_trt, mat2_trt):
         assert len(mat1_trt.shape) == len(mat2_trt.shape)
 
     m1m2_trt = ctx.network.add_matrix_multiply(mat1_trt, op1, mat2_trt, op2).get_output(0)
-    assert len(m1m2_trt.shape) >= 0
     return m1m2_trt
 
 

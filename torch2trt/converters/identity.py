@@ -1,6 +1,7 @@
 from ..conversion_context import *
 
 
+# TODO type conversion using add_identity
 @tensorrt_converter('torch.Tensor.to')
 @tensorrt_converter('torch.Tensor.contiguous')
 @tensorrt_converter('torch.nn.functional.dropout')

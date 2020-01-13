@@ -11,8 +11,8 @@ def convert_Embedding(ctx: ConversionContext):
 
     layer = ctx.network.add_gather(weight, input_trt, 0)
     layer.num_elementwise_dims = 0
-    if not ctx.has_implicit_batch() and len(input_trt.shape) == 2:
-        layer.num_elementwise_dims = 1
+    # if not ctx.has_implicit_batch() and len(input_trt.shape) == 2:
+    #     layer.num_elementwise_dims = 1
 
     output._trt = layer.get_output(0)
 

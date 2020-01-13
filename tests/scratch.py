@@ -44,7 +44,7 @@ with torch.no_grad():
     #                      past=torch.zeros((config.n_layer, 2, ex_batch_size, config.n_head, past_dummy_seq_length,
     #                                        config.n_embd // config.n_head)))  # inputs[1].transpose(0, 1).transpose(1, 2))
     probs, pasts = model(**{name: value for name, value in zip(input_names, inputs)})
-    print(probs, pasts)
+    # print(probs, pasts)
     # print(inputs[0].shape,inputs[1].shape)
     flags = (1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
     model_trt = torch2trt.torch2trt(model, inputs=inputs, input_names=input_names, input_shapes=input_shapes,

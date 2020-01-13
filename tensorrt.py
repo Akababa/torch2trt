@@ -6,7 +6,7 @@ from typing import Callable
 class ILayer:
     def __init__(self):
         self.name = ""
-        self.dtype = None
+        self.dtype = DataType.FLOAT
         self.inputs = []
         self.kwargs = dict()
         self.output_shape = None
@@ -80,9 +80,13 @@ class ILayer:
         assert shape is not None, "shape mocking failed"
         return tuple(map(int, shape))
 
+    def set_output_type(self, idx, dtype):
+        self.dtype = dtype
+
     def get_output(self, i):
         iten = ITensor()
         iten.shape = self.__find_shape()
+        iten.dtype = self.dtype
         return iten
 
 

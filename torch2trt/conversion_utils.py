@@ -10,7 +10,7 @@ tensor_size_old = torch.Tensor.size
 @functools.wraps(get_output_old)
 def get_output_v2(*args, **kwargs):
     output = get_output_old(*args, **kwargs)
-    print(f"  Added {args[0].__class__.__name__}, got output shape {output.shape}")
+    print(f"  Added {args[0].__class__.__name__}: got output shape {output.shape}, dtype {output.dtype}")
     assert len(output.shape) >= 0  # If this fails, check if the inputs to the ILayer match the documentation
     return output
 
