@@ -2,6 +2,7 @@ import torch
 import tensorrt as trt
 import numpy as np
 from .conversion_utils import *
+from typing import Union, Tuple, Dict
 
 CONVERTERS = {}
 
@@ -19,6 +20,7 @@ def _check_torch_dtype(*tensors):
         elif isinstance(t, trt.ITensor):
             tdtype = torch_dtype_from_trt(t.dtype)
         else:
+            assert np.array(t).shape == ()  # must be scalar
             continue
         if dtype is None:
             dtype = tdtype
@@ -44,12 +46,14 @@ class ConversionContext(object):
         self.method_return = None
         self.method_str = None
         self._first_input = None
+        # We keep a dict so we can track ints for dynamic size
+        # self._trt = dict()  # type: Dict[int, trt.ITensor]
         self.hooks = [
             ConversionHook(self, method, converter)
             for method, converter in converters.items()
         ]
 
-    def get_trt_tensor(self, *tensors: torch.Tensor):
+    def get_trt_tensor(self, *tensors: Union[torch.Tensor, trt.ITensor]) -> Union[trt.ITensor, Tuple[trt.ITensor]]:
         """
         Creates missing TensorRT tensors and adds shuffle layers to make tensors broadcastable
         TRT tensors are missing batch dimension (implicit) EXCEPT for CONSTANTS,
@@ -86,7 +90,7 @@ class ConversionContext(object):
                 t._trt = self._add_const_trt(t)
                 trt_tensor = t._trt
                 # trt_tensor._trt_const = True
-            # or... add constant for scalar primitive
+            # or... create and add constant for scalar primitive (lost reference) TODO
             elif isinstance(t, float) or isinstance(t, int):
                 shape = (1,) * broadcast_num_dim
                 scalar = torch.full(shape, t, dtype=dtype)
@@ -107,6 +111,8 @@ class ConversionContext(object):
         # Gets the dim argument, possibly shifted for implicit batch dim.
         # default is in terms of torch, and will get converted to trt!
         torch_dim = self.get_arg(name, pos, default=default)
+        if torch_dim is None:
+            return torch_dim
         return self._torch_dim_to_trt_dim(torch_dim)
 
     def _to_trt_dim(self, dim: int):
@@ -118,7 +124,7 @@ class ConversionContext(object):
 
     def _torch_dim_to_trt_dim(self, torch_dim):
         trt_ndim = self.trt_ndim()
-        if torch_dim == "_all":
+        if isinstance(torch_dim, str) and torch_dim == "_all":
             trt_dim = list(range(trt_ndim))
         elif isinstance(torch_dim, int):
             trt_dim = self._to_trt_dim(torch_dim)
@@ -197,6 +203,12 @@ class ConversionContext(object):
         else:
             raise ValueError(f"Missing arg {name} at pos {pos}")
 
+    def get_dim_of_shape(self, trt_shape: trt.ITensor, trt_dim: int) -> trt.ITensor:
+        trt_dyn_shape_dim = self.network.add_slice(trt_shape, (trt_dim,), (1,), (0,)).get_output(0)
+        layer = self.network.add_shuffle(trt_dyn_shape_dim)
+        layer.reshape_dims = ()
+        return layer.get_output(0)
+
     def __enter__(self):
         for hook in self.hooks:
             hook.__enter__()
@@ -216,10 +228,16 @@ class ConversionContext(object):
                 shape = tuple(torch_input.shape if input_shapes is None else input_shapes[i])
                 if self.has_implicit_batch():
                     shape = shape[1:]
+                torch_dtype = torch_input.dtype
+                if torch_dtype == torch.long:
+                    print(f"Info: Found input {names[i]} with dtype torch.long. "
+                          f"TRT doesn't support int64 so the converted model "
+                          "will use input with dtype int32 instead.")
+                    torch_dtype = torch.int32
                 trt_tensor = self.network.add_input(
                     name=names[i],
                     shape=shape,
-                    dtype=torch_dtype_to_trt(torch_input.dtype),
+                    dtype=torch_dtype_to_trt(torch_dtype),
                 )
                 trt_tensor.location = torch_device_to_trt(torch_input.device)
                 torch_input._trt = trt_tensor
@@ -234,6 +252,7 @@ class ConversionContext(object):
             trt_tensor.name = names[i]
             trt_tensor.location = torch_device_to_trt(torch_output.device)
             trt_tensor.dtype = torch_dtype_to_trt(torch_output.dtype)
+            print(f"Found output {trt_tensor.name} with shape {trt_tensor.shape}, dtype {trt_tensor.dtype}")
             self.network.mark_output(trt_tensor)
 
     def has_implicit_batch(self) -> bool:
@@ -248,8 +267,7 @@ class ConversionContext(object):
         array = tensor.detach().cpu().numpy()
         if array.dtype == np.int64:  # TRT doesn't support long
             array = array.astype(np.int32)
-        layer = self.network.add_constant(shape, array)
-        return layer.get_output(0)
+        return self.network.add_constant(shape, array).get_output(0)
 
     def setup_method(self, args, kwargs, outputs, method_str):
         self.method_args = args
@@ -309,12 +327,21 @@ def _attach_converter(ctx: ConversionContext, method, converter, method_str):
 
         if not skip:
             ctx.setup_method(args, kwargs, outputs, method_str)
+            if converter["is_real"]:
+                print(f"Converting {method_str}...")
 
-            print(f"Converting {method_str}...")
             converter['converter'](ctx)
+
+            if not (outputs is ctx.method_return):
+                print(f"wrapper overwrote output!")
+                assert converter["is_real"]
+                outputs = ctx.method_return
+
             if converter['is_real']:
                 def _check_shape_recursive(outputs_recurse, pos=()):
                     # Checks for corrupted converter trt tensor outputs, since python api/abi doesn't do so
+                    if isinstance(outputs_recurse, int) or isinstance(outputs_recurse, float):
+                        return
                     if isinstance(outputs_recurse, torch.Tensor):
                         if hasattr(outputs_recurse, "_trt"):
                             try:
@@ -331,8 +358,7 @@ def _attach_converter(ctx: ConversionContext, method, converter, method_str):
 
                 _check_shape_recursive(ctx.method_return)
 
-            print("...done")
-
+            print()
             # convert to None so conversion will fail for unsupported layers
             ctx.cleanup_method()
             ctx.lock = False

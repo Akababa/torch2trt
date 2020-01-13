@@ -35,7 +35,7 @@ for kv in "kv":
     for layer_idx in range(config.n_layer):
         input_name = f"past_{layer_idx}_{kv}"
         input_names.append(input_name)
-        input_shapes.append((ex_batch_size, config.n_head, -1, config.n_embd))
+        input_shapes.append((ex_batch_size, config.n_head, -1, config.n_embd // config.n_head))
         inputs.append(torch.zeros(past_dummy_shape))
         opt_profile[input_name] = past_prof
 

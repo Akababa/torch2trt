@@ -40,6 +40,7 @@ from .prod import *
 from .relu import *
 from .relu6 import *
 from .sigmoid import *
+from .size import *
 from .softmax import *
 from .split import *
 from .sub import *
