@@ -92,9 +92,22 @@ class ConversionContext(object):
         return trt_tensor
 
     def reshape_to(self, trt_tensor: trt.ITensor, new_shape):
-        assert new_shape.count(-1) <= 1
         layer = self.network.add_shuffle(trt_tensor)
-        layer.reshape_dims = new_shape
+        if all(isinstance(d, int) for d in new_shape):
+            assert new_shape.count(-1) <= 1
+            layer.reshape_dims = new_shape
+        else:  # I have a tensor
+            new_shape_tensor = self._make_shape_tensor(new_shape)
+            layer.set_input(1, new_shape_tensor)
+        return layer.get_output(0)
+
+    # TODO use this everywhere
+    def _make_shape_tensor(self, shape):
+        # Makes a 1d shape trt tensor
+        trt_dims = [self.get_trt_one(t) for t in shape]
+        trt_dims = [self.reshape_to(t, (1,)) for t in trt_dims]
+        layer = self.network.add_concatenation(trt_dims)
+        layer.axis = 0
         return layer.get_output(0)
 
     def get_arg(self, name, pos, default=__default, to_trt=False):
@@ -232,7 +245,7 @@ class ConversionHook(object):
 
 def shape_ok(t: torch.Tensor):
     assert isinstance(t, torch.Tensor)
-    return all(torch_d == trt_d or trt_d == -1 for torch_d, trt_d in
+    assert all(torch_d == trt_d or trt_d == -1 for torch_d, trt_d in
                zip(t.shape, t._trt.shape))
 
 
@@ -314,9 +327,10 @@ def _attach_converter(ctx: ConversionContext, method, converter, method_str):
                         if hasattr(outputs_recurse, "_trt"):
                             try:
                                 len(outputs_recurse._trt.shape)  # This will crash python without exception handling
-                                assert shape_ok(outputs_recurse)
-                                print(f"Output shape     {tuple(outputs_recurse._trt.shape)}, {outputs_recurse._trt.dtype}\n"
-                                      f"matched expected {tuple(outputs_recurse.shape)}, {outputs_recurse.dtype}")
+                                shape_ok(outputs_recurse)
+                                print(
+                                    f"Output shape     {tuple(outputs_recurse._trt.shape)}, {outputs_recurse._trt.dtype}\n"
+                                    f"matched expected {tuple(outputs_recurse.shape)}, {outputs_recurse.dtype}")
                             except Exception as e:
                                 print(f"Error: wrong shape on output {pos} of {method_str}:\n"
                                       f"expected:{tuple(outputs_recurse.shape)}\n"

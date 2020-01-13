@@ -15,7 +15,7 @@ input_dummy_seq_length = 11
 ex_batch_size = 5
 
 config = gpt2.GPT2Config(n_layer=13, n_head=2, n_embd=4, vocab_size=10)
-model = gpt2.GPT2LMHeadModel(config)
+model = gpt2.GPT2Model(config)
 # [batch, heads, sequence, embed]
 past_dummy_shape = (ex_batch_size, config.n_head, past_dummy_seq_length, config.n_embd // config.n_head)
 past_prof = np.array([past_dummy_shape] * 3)  # [(x, x, x) for x in past_dummy_shape]
@@ -43,7 +43,7 @@ with torch.no_grad():
     # probs, pasts = model(input_ids=inputs[0].to(torch.long),
     #                      past=torch.zeros((config.n_layer, 2, ex_batch_size, config.n_head, past_dummy_seq_length,
     #                                        config.n_embd // config.n_head)))  # inputs[1].transpose(0, 1).transpose(1, 2))
-    probs, pasts = model(**{name: value for name, value in zip(input_names, inputs)})
+    # probs, pasts = model(**{name: value for name, value in zip(input_names, inputs)})
     # print(probs, pasts)
     # print(inputs[0].shape,inputs[1].shape)
     flags = (1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))

@@ -170,7 +170,8 @@ class Block(nn.Module):
         self.mlp = MLP(4 * n_embd, config)
 
     def forward(self, x, layer_past=None):
-        a, present = self.attn(self.ln_1(x), layer_past=layer_past)
+        ln1_x = self.ln_1(x)
+        a, present = self.attn(ln1_x, layer_past=layer_past)
         x = x + a
         x += self.mlp(self.ln_2(x))  # residual
 

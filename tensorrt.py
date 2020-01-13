@@ -1,6 +1,7 @@
 # Mock for tensorrt, like pycharm stubs
 from enum import Enum
 from typing import Callable
+import numpy as np
 
 
 class ILayer:
@@ -10,28 +11,28 @@ class ILayer:
         self.inputs = []
         self.kwargs = dict()
         self.output_shape = None
+        self.torch_value = None
 
     def get_input(self, i):
         return self.inputs[i]
 
+    def set_input(self, i, inp):
+        if self.name == "concatenation":
+            self.reshape_dims = inp
+
     def __find_shape(self):
-        shape = None
-        try:
-            shape = self.inputs[0].shape
-        except:
-            try:
-                shape = self.kwargs["input"].shape
-            except:
-                try:
-                    shape = self.kwargs["inputs"][0].shape
-                except:
-                    pass
+        shape = self.__yolo_shape()
         if self.name in ("constant",):
             shape = self.inputs[1].shape
+            self.torch_value = self.inputs[1]
         elif self.name in ("shape",):
             shape = (len(self.inputs[0].shape),)
+            self.torch_value = self.inputs[0].shape
         elif self.name in ("slice",):
             shape = self.inputs[2]
+            myslices = [slice(st, st + si, 1 if stride == 0 else stride) for st, si, stride in zip(*self.inputs[1:4])]
+            myslices = tuple(myslices) if len(myslices) > 1 else myslices[0]
+            self.torch_value = self.inputs[0].torch_value.__getitem__(myslices)
         elif self.name in ("shuffle",):
             shape = self.inputs[0].shape
             if hasattr(self, "first_transpose"):
@@ -43,6 +44,8 @@ class ILayer:
                 shape = newshape
             if hasattr(self, "second_transpose"):
                 shape = [shape[i] for i in self.second_transpose]
+            if len(shape) <= 1:
+                self.torch_value = np.array(self.torch_value).reshape(shape)
         elif self.name in ("gather",):
             shape = list(self.inputs[1].shape)
             shape.append(self.inputs[0].shape[-1])
@@ -82,6 +85,40 @@ class ILayer:
         assert shape is not None, "shape mocking failed"
         return tuple(map(int, shape))
 
+    def __yolo_shape(self):
+        try:
+            shape = self.inputs[0].shape
+            self.torch_value = self.inputs[0].torch_value
+            return shape
+        except:
+            pass
+        try:
+            shape = self.inputs[0][0].shape
+            self.torch_value = self.inputs[0][0].torch_value
+            return shape
+        except:
+            pass
+        try:
+            shape = self.kwargs["input"].shape
+            self.torch_value = self.kwargs["input"]
+            return shape
+        except:
+            pass
+        try:
+            shape = self.kwargs["inputs"][0].shape
+            self.torch_value = self.kwargs["inputs"][0].shape
+            return shape
+        except:
+            pass
+        try:
+            shape = self.kwargs["tensors"][0].shape
+            self.torch_value = self.kwargs["tensors"][0].shape
+            return shape
+        except:
+            pass
+        print("YOLO shape failed")
+        return None
+
     def set_output_type(self, idx, dtype):
         self.dtype = dtype
 
@@ -89,6 +126,10 @@ class ILayer:
         iten = ITensor()
         iten.shape = self.__find_shape()
         iten.dtype = self.dtype
+        iten.torch_value = self.torch_value
+        iten.last_layer = self.name
+        # if self.name == "concatenation":
+
         return iten
 
 
@@ -138,6 +179,7 @@ class ITensor:
         # self.name = ""
         self.shape = None
         self.dtype = DataType.HALF
+        self.torch_value = None
 
 
 class Builder:

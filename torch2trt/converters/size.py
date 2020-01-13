@@ -25,7 +25,7 @@ def convert_size(ctx: ConversionContext):
             new_output = []
             # Detect static/dynamic dims and output either python_int/trt_scalar
             for idx, input_dim, output_dim in zip(range(len(output)), input_trt.shape, output):
-                if input_dim == -1:
+                if input_dim == -1:  # make it a torch tensor and add ._trt attribute to it
                     output_dim = torch.tensor(output_dim, dtype=torch.int32)
                     output_dim._trt = ctx.get_dim_of_shape(trt_dyn_shape, idx)
                     new_output.append(output_dim)
