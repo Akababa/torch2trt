@@ -8,7 +8,7 @@ def convert_AdaptiveAvgPool2d(ctx):
     input = ctx.method_args[1]
     output = ctx.method_return
     
-    input_trt = ctx.get_trt_tensor(input)
+    input_trt = ctx.get_trt_one(input)
 
     output_size = module.output_size
     if not isinstance(output_size, tuple):

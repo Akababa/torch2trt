@@ -3,36 +3,30 @@ from ..conversion_context import *
 
 @tensorrt_converter('torch.cat')
 def convert_cat(ctx: ConversionContext):
-    inputs = ctx.method_args[0]
+    inputs = ctx.get_arg("tensors", 0, to_trt=False)
+    trt_inputs = [ctx.get_trt_one(inp) for inp in inputs]
 
-    # dim = ctx.get_arg("dim", 1, default=1)
+    layer = ctx.network.add_concatenation(trt_inputs)
+    layer.axis = ctx.get_trt_dim(pos=1, default=0, ndims=len(trt_inputs[0].shape))
 
     output = ctx.method_return
-    trt_inputs = [ctx.get_trt_tensor(i) for i in inputs]
-
-    layer = ctx.network.add_concatenation(inputs=trt_inputs)
-    layer.axis = ctx.get_trt_dim(pos=1, default=1)
     output._trt = layer.get_output(0)
 
 
 @tensorrt_converter('torch.stack')
 def convert_cat(ctx: ConversionContext):
-    inputs = ctx.method_args[0]
+    inputs = ctx.get_arg("tensors", 0, to_trt=False)
+    trt_inputs = [ctx.get_trt_one(inp) for inp in inputs]
 
-    dim = ctx.get_arg("dim", 1, default=1)
-    output = ctx.method_return
+    ndims = len(trt_inputs[0].shape)  # before stack
+    axis = ctx.get_trt_dim(pos=1, default=0, ndims=ndims)
 
-    axis = dim if dim >= 0 else output.ndim() + dim
-    rshape = list(output.shape[ctx.nonbatch_dim:])
-    rshape[axis] = 1
+    rshape = list(trt_inputs[0].shape)
+    rshape.insert(axis, 1)
 
-    trt_inputs = [ctx.get_trt_tensor(i) for i in inputs]
-    trt_inputs_unsqueezed = []
-    for trt_in in trt_inputs:
-        shuf_l = ctx.network.add_shuffle(trt_in)
-        shuf_l.reshape_dims = rshape
-        trt_inputs_unsqueezed.append(shuf_l.get_output(0))
+    trt_inputs_unsqueezed = [ctx.reshape_to(tt, rshape) for tt in trt_inputs]
 
-    layer = ctx.network.add_concatenation(inputs=trt_inputs)
+    layer = ctx.network.add_concatenation(trt_inputs_unsqueezed)
     layer.axis = axis
+    output = ctx.method_return
     output._trt = layer.get_output(0)

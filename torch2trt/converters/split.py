@@ -5,18 +5,17 @@ from torch2trt.module_test import add_module_test
 @tensorrt_converter('torch.split')
 @tensorrt_converter('torch.Tensor.split')
 def convert_split(ctx: ConversionContext):
-    input = ctx.get_arg('input', 0, None)
-    input_trt = ctx.get_trt_tensor(input)
+    input_trt = ctx.get_arg('input', 0, to_trt=True)
     # we don't need to parse split/chunk (arg 1)
     # since we infer size from output tensors
-    trt_dim = ctx.get_trt_dim(pos=2, default=0)
+    trt_dim = ctx.get_trt_dim(pos=2, default=0, ndims=len(input_trt.shape))
     # ctx.get_arg('dim', 2, 0)
 
     outputs = ctx.method_return
 
     # assert(dim >= 1)
 
-    start = [0] * len(input.shape[ctx.nonbatch_dim:])  # exclude batch
+    start = [0] * len(input_trt.shape[ctx.nonbatch_dim:])  # exclude batch
     # TODO: Fix constants
     stride = [1] * len(start)
     offset = 0
@@ -25,7 +24,7 @@ def convert_split(ctx: ConversionContext):
     for i, output in enumerate(outputs):
         shape = list(output.shape[ctx.nonbatch_dim:])  # exclude batch dim
         start[trt_dim] = offset
-        layer = ctx.network.add_slice(input_trt, start=start, shape=shape, stride=stride)
+        layer = ctx.network.add_slice(input_trt, start, shape, stride)
         output._trt = layer.get_output(0)
         offset = offset + shape[trt_dim]
 

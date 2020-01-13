@@ -1,5 +1,6 @@
 from ..conversion_context import *
 from torch2trt.module_test import add_module_test
+from .binary import convert_binary_elementwise
 
 
 @tensorrt_converter('torch.mul')
@@ -7,12 +8,7 @@ from torch2trt.module_test import add_module_test
 @tensorrt_converter('torch.Tensor.__mul__')
 @tensorrt_converter('torch.Tensor.__rmul__')
 def convert_mul(ctx):
-    input_a = ctx.method_args[0]
-    input_b = ctx.method_args[1]
-    input_a_trt, input_b_trt = ctx.get_trt_tensor(input_a, input_b)
-    output = ctx.method_return
-    layer = ctx.network.add_elementwise(input_a_trt, input_b_trt, trt.ElementWiseOperation.PROD)
-    output._trt = layer.get_output(0)
+    convert_binary_elementwise(ctx, trt.ElementWiseOperation.PROD)
 
 
 class Mul(torch.nn.Module):
@@ -21,6 +17,7 @@ class Mul(torch.nn.Module):
 
     def forward(self, x, y):
         return x * y
+
 
 @add_module_test(torch.float32, torch.device('cuda'), [(1, 3, 224, 224), (1, 3, 224, 224)])
 def test_mul_basic():
@@ -47,7 +44,7 @@ class TorchMul(torch.nn.Module):
 
     def forward(self, x, y):
         return torch.mul(x, y)
-    
+
 
 @add_module_test(torch.float32, torch.device('cuda'), [(1, 3, 224, 224), (1, 3, 224, 224)])
 def test_mul_torchmul():

@@ -19,28 +19,24 @@ def _matmul(ctx, mat1_trt, mat2_trt):
 @tensorrt_converter('torch.matmul')
 @tensorrt_converter('torch.Tensor.matmul')
 def convert_matmul(ctx):
-    mat1 = ctx.method_args[0]
-    mat2 = ctx.method_args[1]
-    mat1_trt = ctx.get_trt_tensor(mat1)
-    mat2_trt = ctx.get_trt_tensor(mat2)
+    mat1_trt = ctx.get_arg("input", 0, to_trt=True)
+    mat2_trt = ctx.get_arg("other", 1, to_trt=True)
     output = ctx.method_return
     output._trt = _matmul(ctx, mat1_trt, mat2_trt)  # TODO fix this!!!
 
 
 @tensorrt_converter('torch.addmm')
 @tensorrt_converter('torch.Tensor.addmm')
-def convert_addmm(ctx):
-    input = ctx.get_arg("input", 0, None)
-    mat1 = ctx.get_arg("mat1", 1, None)
-    mat2 = ctx.get_arg("mat2", 2, None)
-    output = ctx.method_return
+def convert_addmm(ctx: ConversionContext):
+    input_trt = ctx.get_arg("input", 0, to_trt=True)
+    mat1_trt = ctx.get_arg("mat1", 1, to_trt=True)
+    mat2_trt = ctx.get_arg("mat2", 2, to_trt=True)
 
-    mat1_trt = ctx.get_trt_tensor(mat1)
-    mat2_trt = ctx.get_trt_tensor(mat2)
     m1m2_trt = _matmul(ctx, mat1_trt, mat2_trt)
 
-    m1m2_trt, input_trt = ctx.get_trt_tensor(m1m2_trt, input)
+    m1m2_trt, input_trt = ctx.broadcast_together(m1m2_trt, input_trt)
     layer = ctx.network.add_elementwise(m1m2_trt, input_trt, trt.ElementWiseOperation.SUM)
+    output = ctx.method_return
     output._trt = layer.get_output(0)
 
 

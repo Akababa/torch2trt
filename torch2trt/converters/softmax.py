@@ -4,14 +4,16 @@ from torch2trt.module_test import add_module_test
 
 @tensorrt_converter('torch.nn.functional.softmax')
 def convert_softmax(ctx: ConversionContext):
-    input = ctx.method_args[0]
-    # input_trt = ctx.get_trt_tensor(input)  # should be a variable
+    input_trt = ctx.get_arg("input", 0, to_trt=True)
+    dim = ctx.get_trt_dim("dim", 1, default="_all", ndims=len(input_trt.shape))
+
+    # input_trt = ctx.get_trt_one(input)  # should be a variable
     output = ctx.method_return
 
     # get dims from args or kwargs
 
-    layer = ctx.network.add_softmax(input=input._trt)
-    layer.axes = ctx.get_trt_axes()
+    layer = ctx.network.add_softmax(input=input_trt)
+    layer.axes = ctx.get_trt_axes(dim, None)
 
     output._trt = layer.get_output(0)
 

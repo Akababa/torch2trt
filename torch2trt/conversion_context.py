@@ -2,35 +2,31 @@ import torch
 import tensorrt as trt
 import numpy as np
 from .conversion_utils import *
-from typing import Union, Tuple, Dict
+from typing import Union, Tuple, Dict, Optional
 
 CONVERTERS = {}
 
 
-def is_implicit_batch_tensor(t: torch.Tensor):
-    return len(t.shape) != len(t._trt.shape)
+# Assume there will NEVER be a dynamic dim index
+def _fix_dim(dim, ndims: Optional[int]):
+    if dim is None:
+        return dim
+    if dim == "_all":
+        assert isinstance(ndims, int)
+        return tuple(range(ndims))
 
+    def helper(d):
+        if d < 0:
+            d = ndims + d
+        assert 0 <= d
+        assert ndims is None or d < ndims
+        return d
 
-# TODO remove this
-def _check_torch_dtype(*tensors):
-    dtype = None
-    for t in tensors:
-        if isinstance(t, torch.Tensor):
-            tdtype = t.dtype
-        elif isinstance(t, trt.ITensor):
-            tdtype = torch_dtype_from_trt(t.dtype)
-        else:
-            assert np.array(t).shape == ()  # must be scalar
-            continue
-        if dtype is None:
-            dtype = tdtype
-        else:
-            assert (dtype == tdtype), 'Tensor data types must match'
-    # assert (dtype is not None)  # , 'Data type could not be inferred from any item in list')
-    if dtype is None and len(tensors) == 1:
-        dtype = torch.float32 if isinstance(tensors[0], float) else torch.int32
-    assert dtype is not None, "No data type!"
-    return dtype
+    if isinstance(dim, int):
+        return helper(dim)
+    else:
+        assert isinstance(dim, list) or isinstance(dim, tuple)
+        return tuple(helper(d) for d in dim)
 
 
 # put constants with batch dim?
@@ -38,138 +34,50 @@ def _check_torch_dtype(*tensors):
 class ConversionContext(object):
     __default = object()  # dummy default
 
-    def __init__(self, network: trt.INetworkDefinition, converters=CONVERTERS):
-        self.network = network
-        self.lock = False
-        self.method_args = None
-        self.method_kwargs = None
-        self.method_return = None
-        self.method_str = None
-        self._first_input = None
-        # We keep a dict so we can track ints for dynamic size
-        # self._trt = dict()  # type: Dict[int, trt.ITensor]
-        self.hooks = [
-            ConversionHook(self, method, converter)
-            for method, converter in converters.items()
-        ]
+    def get_trt_one(self, t: Union[torch.Tensor, float, int]) -> trt.ITensor:
+        # GET TRT TENSOR (OR CREATE TRT CONSTANT)
+        # get tensor w/ _trt
+        if isinstance(t, torch.Tensor) and hasattr(t, '_trt'):
+            trt_tensor = t._trt
+        # elif isinstance(t, trt.ITensor):
+        #     trt_tensor = t
+        # or... add constant for leaf tensor w/o _trt
+        elif isinstance(t, torch.Tensor) and not hasattr(t, '_trt'):
+            # add leaf tensor - don't exclude batch when adding constants...?
+            t._trt = self._add_const_trt(t)
+            trt_tensor = t._trt
+        # or... create and add constant for scalar primitive (lost reference) TODO
+        elif isinstance(t, float) or isinstance(t, int):
+            dtype = (torch.float32 if isinstance(t, float) else torch.int32)
+            trt_tensor = self._add_const_trt(torch.tensor(t, dtype=dtype))
+        else:
+            raise ValueError(f'Bad tensor of type {type(t)}')
 
-    def get_trt_tensor(self, *tensors: Union[torch.Tensor, trt.ITensor]) -> Union[trt.ITensor, Tuple[trt.ITensor]]:
-        """
-        Creates missing TensorRT tensors and adds shuffle layers to make tensors broadcastable
-        TRT tensors are missing batch dimension (implicit) EXCEPT for CONSTANTS,
-         while pytorch tensors have the first batch dim (explicit)
-        """
-        dtype = _check_torch_dtype(*tensors)
-        # get broadcast dimension
-        broadcast_num_dim = 0  # 0 dim DOES exist!!
-        for t in tensors:
-            if isinstance(t, torch.Tensor):
-                if not hasattr(t, '_trt'):  # It's a constant!!
-                    num_dim = len(t.shape)  # don't exclude batch for constants
-                else:  # It's a variable (on input path)
-                    num_dim = len(t._trt.shape)  # non-leaf tensors must already have _trt, get shape from that
-            elif isinstance(t, trt.ITensor):
-                num_dim = len(t.shape)
-            else:
-                continue
-            broadcast_num_dim = max(broadcast_num_dim, num_dim)
+        assert len(trt_tensor.shape) >= 0
+        return trt_tensor
 
-        #  convert to list of trt.ITensor
-        trt_tensors = []
-        for i, t in enumerate(tensors):
-            # GET TRT TENSOR (OR CREATE TRT CONSTANT)
-            # get tensor w/ _trt
-            if isinstance(t, torch.Tensor) and hasattr(t, '_trt'):
-                trt_tensor = t._trt
-                # trt_tensor._trt_const = False
-            elif isinstance(t, trt.ITensor):
-                trt_tensor = t
-            # or... add constant for leaf tensor w/o _trt
-            elif isinstance(t, torch.Tensor) and not hasattr(t, '_trt'):
-                # add leaf tensor - don't exclude batch when adding constants...?
-                t._trt = self._add_const_trt(t)
-                trt_tensor = t._trt
-                # trt_tensor._trt_const = True
-            # or... create and add constant for scalar primitive (lost reference) TODO
-            elif isinstance(t, float) or isinstance(t, int):
-                shape = (1,) * broadcast_num_dim
-                scalar = torch.full(shape, t, dtype=dtype)
-                trt_tensor = self._add_const_trt(scalar)
-                # trt_tensor._trt_const = True
-            else:
-                raise ValueError(f'Bad tensor of type {type(t)}')
+    def broadcast_together(self, *tensors: trt.ITensor):
+        assert all(isinstance(t, trt.ITensor) for t in tensors)
+        assert len(set(t.dtype for t in tensors)) == 1
+        broadcast_num_dim = max(len(t.shape) for t in tensors)
+        new_tensors = [self.make_broadcastable_to(t, broadcast_num_dim) for t in tensors]
+        all_dims_set = [set(nt.shape[i] for nt in new_tensors) - {1, -1} for i in range(broadcast_num_dim)]
+        assert all(len(dims_set) <= 1 for dims_set in all_dims_set)
+        return new_tensors
 
-            assert len(trt_tensor.shape) >= 0
-
-            # MAKE TRT TENSOR BROADCASTABLE IF IT IS NOT ALREADY, and add to list
-            trt_tensor = self.make_broadcastable_to(trt_tensor, broadcast_num_dim)
-            trt_tensors.append(trt_tensor)
-
-        return trt_tensors[0] if len(trt_tensors) == 1 else tuple(trt_tensors)
-
-    def get_trt_dim(self, name="dim", pos=1, default=__default):
+    def get_trt_dim(self, name="dim", pos=1, default=__default, ndims=None):
+        # If ndims is none, we must have no negative dim indices.
         # Gets the dim argument, possibly shifted for implicit batch dim.
         # default is in terms of torch, and will get converted to trt!
-        torch_dim = self.get_arg(name, pos, default=default)
-        if torch_dim is None:
-            return torch_dim
-        return self._torch_dim_to_trt_dim(torch_dim)
+        dim = self.get_arg(name, pos, default=default)
+        dim = _fix_dim(dim, ndims)
+        return dim
 
-    def _to_trt_dim(self, dim: int):
-        # Helper function, converts one torch dim to trt dim (including negative dim)
-        if dim < 0:
-            ndim = self.first_input().dim()
-            dim = ndim + dim
-        return dim - 1 if self.input_has_implicit_batch() else dim
-
-    def _torch_dim_to_trt_dim(self, torch_dim):
-        trt_ndim = self.trt_ndim()
-        if isinstance(torch_dim, str) and torch_dim == "_all":
-            trt_dim = list(range(trt_ndim))
-        elif isinstance(torch_dim, int):
-            trt_dim = self._to_trt_dim(torch_dim)
-        else:
-            trt_dim = [self._to_trt_dim(d) for d in torch_dim]
-
-        assert all(0 <= np.array([trt_dim]) < trt_ndim), "Invalid dimension"
-        return trt_dim
-
-    def trt_ndim(self) -> int:
-        fi = self.first_input()
-        ndim = len(fi._trt.shape)
-        assert ndim == self._to_trt_dim(fi.dim()), f"Mismatch torch {tuple(fi.shape)} and trt {fi._trt.shape} dims"
-        return ndim
-
-    def input_has_implicit_batch(self):
-        # This only happens if the network has implicit batch AND the input is not a constant
-        return self.has_implicit_batch() and len(self.first_input().shape) == len(self.first_input()._trt.shape)
-
-    def first_input(self) -> torch.Tensor:
-        if self._first_input is not None:
-            return self._first_input
-        first_input = self.method_args[0]
-        while not isinstance(first_input, torch.Tensor):
-            first_input = first_input[0]
-        self._first_input = first_input
-        return first_input
-
-    def get_trt_axes(self, *, trt_dim=__default, torch_dim=__default):
+    def get_trt_axes(self, trt_dim, ndims):
         # Returns an axes bitmask
-        assert sum(x is not ConversionContext.__default for x in
-                   [trt_dim, torch_dim]) <= 1, "Can't have both trt_dim and torch_dim"
-
-        if trt_dim is ConversionContext.__default:
-            if torch_dim is ConversionContext.__default:  # Nothing passed, calculate dims
-                trt_dim = self.get_trt_dim()
-            else:
-                trt_dim = self._torch_dim_to_trt_dim(torch_dim)
-        if trt_dim == "_all":
-            trt_dim = list(range(self.trt_ndim()))
-        if isinstance(trt_dim, list):
-            trt_dim = tuple(trt_dim)
-        if not isinstance(trt_dim, tuple):
+        if isinstance(trt_dim, int):
             trt_dim = (trt_dim,)
-
+        trt_dim = _fix_dim(trt_dim, ndims)
         # create axes bitmask for reduce layer
         axes = 0
         for d in trt_dim:
@@ -180,43 +88,38 @@ class ConversionContext(object):
 
     # If len(trt_tensor.shape) < broadcast_num_dim, prepends 1 dims to match number of dims in shape,
     # otherwise returns trt_tensor
-    def make_broadcastable_to(self, trt_tensor, broadcast_num_dim):
+    def make_broadcastable_to(self, trt_tensor: trt.ITensor, broadcast_num_dim: int):
+        assert isinstance(trt_tensor, trt.ITensor)
         trt_num_dims = len(trt_tensor.shape)
         assert trt_num_dims <= broadcast_num_dim
         if trt_num_dims < broadcast_num_dim:
             # append 1 size dims to front
             diff = broadcast_num_dim - trt_num_dims
             shape = tuple([1] * diff + list(trt_tensor.shape))
-            layer = self.network.add_shuffle(trt_tensor)
-            layer.reshape_dims = shape
-            trt_tensor = layer.get_output(0)
-            assert len(trt_tensor.shape) >= 0
+            trt_tensor = self.reshape_to(trt_tensor, shape)
         return trt_tensor
 
-    def get_arg(self, name, pos, default=__default):
+    def reshape_to(self, trt_tensor: trt.ITensor, new_shape):
+        layer = self.network.add_shuffle(trt_tensor)
+        layer.reshape_dims = new_shape
+        return layer.get_output(0)
+
+    def get_arg(self, name, pos, default=__default, to_trt=False):
         if name in self.method_kwargs:
-            return self.method_kwargs[name]
+            val = self.method_kwargs[name]
         elif len(self.method_args) > pos:
-            return self.method_args[pos]
+            val = self.method_args[pos]
         elif default is not ConversionContext.__default:
-            return default
+            val = default
         else:
             raise ValueError(f"Missing arg {name} at pos {pos}")
+        if to_trt:
+            val = self.get_trt_one(val)
+        return val
 
     def get_dim_of_shape(self, trt_shape: trt.ITensor, trt_dim: int) -> trt.ITensor:
         trt_dyn_shape_dim = self.network.add_slice(trt_shape, (trt_dim,), (1,), (0,)).get_output(0)
-        layer = self.network.add_shuffle(trt_dyn_shape_dim)
-        layer.reshape_dims = ()
-        return layer.get_output(0)
-
-    def __enter__(self):
-        for hook in self.hooks:
-            hook.__enter__()
-        return self
-
-    def __exit__(self, type, val, tb):
-        for hook in self.hooks:
-            hook.__exit__(type, val, tb)
+        return self.reshape_to(trt_dyn_shape_dim, ())
 
     def add_inputs(self, torch_inputs, input_shapes=None, names=None):
         if names is None:
@@ -266,6 +169,7 @@ class ConversionContext(object):
         shape = tuple(tensor.shape)
         array = tensor.detach().cpu().numpy()
         if array.dtype == np.int64:  # TRT doesn't support long
+            # print(f"Warning: implicitly converting an array of shape {array.shape} from int64 to int32")
             array = array.astype(np.int32)
         return self.network.add_constant(shape, array).get_output(0)
 
@@ -282,6 +186,30 @@ class ConversionContext(object):
         self.method_return = None
         self.method_str = None
         self._first_input = None
+
+    def __enter__(self):
+        for hook in self.hooks:
+            hook.__enter__()
+        return self
+
+    def __exit__(self, type, val, tb):
+        for hook in self.hooks:
+            hook.__exit__(type, val, tb)
+
+    def __init__(self, network: trt.INetworkDefinition, converters=CONVERTERS):
+        self.network = network
+        self.lock = False
+        self.method_args = None
+        self.method_kwargs = None
+        self.method_return = None
+        self.method_str = None
+        self._first_input = None
+        # We keep a dict so we can track ints for dynamic size
+        # self._trt = dict()  # type: Dict[int, trt.ITensor]
+        self.hooks = [
+            ConversionHook(self, method, converter)
+            for method, converter in converters.items()
+        ]
 
 
 class ConversionHook(object):
@@ -345,10 +273,15 @@ def _attach_converter(ctx: ConversionContext, method, converter, method_str):
                     if isinstance(outputs_recurse, torch.Tensor):
                         if hasattr(outputs_recurse, "_trt"):
                             try:
-                                len(outputs_recurse._trt.shape)
+                                len(outputs_recurse._trt.shape)  # This will crash python without exception handling
+                                assert all(torch_d == trt_d or trt_d == -1 for torch_d, trt_d in
+                                           zip(outputs_recurse.shape, outputs_recurse._trt.shape))
+                                print(f"Output shape     {tuple(outputs_recurse._trt.shape)}\n"
+                                      f"matched expected {tuple(outputs_recurse.shape)}")
                             except Exception as e:
-                                print(f"Error: bad shape on output {pos} of {method_str}"
-                                      f" (expected {tuple(outputs_recurse.shape)}")
+                                print(f"Error: wrong shape on output {pos} of {method_str}:\n"
+                                      f"expected:{tuple(outputs_recurse.shape)}\n"
+                                      f"actual:  {tuple(outputs_recurse._trt.shape)}")
                                 raise e
                         else:
                             print(f"Warning: output {pos} of {method_str} not supported")

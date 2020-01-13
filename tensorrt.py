@@ -8,15 +8,81 @@ class ILayer:
         self.name = ""
         self.dtype = None
         self.inputs = []
+        self.kwargs = dict()
         self.output_shape = None
 
     def get_input(self, i):
         return self.inputs[i]
 
+    def __find_shape(self):
+        shape = None
+        try:
+            shape = self.inputs[0].shape
+        except:
+            try:
+                shape = self.kwargs["input"].shape
+            except:
+                try:
+                    shape = self.kwargs["inputs"][0].shape
+                except:
+                    pass
+        if self.name in ("constant",):
+            shape = self.inputs[1].shape
+        elif self.name in ("shape",):
+            shape = (len(self.inputs[0].shape),)
+        elif self.name in ("slice",):
+            shape = self.inputs[2]
+        elif self.name in ("shuffle",):
+            if hasattr(self, "reshape_dims"):
+                shape = self.reshape_dims
+            else:
+                shape = self.inputs[0].shape
+                if hasattr(self, "first_transpose"):
+                    shape = [shape[i] for i in self.first_transpose]
+            if hasattr(self, "second_transpose"):
+                shape = [shape[i] for i in self.second_transpose]
+        elif self.name in ("gather",):
+            shape = list(self.inputs[1].shape)
+            shape.append(self.inputs[0].shape[-1])
+        elif self.name in ("matrix_multiply",):
+            m1, m2 = self.inputs[0], self.inputs[2]
+            shape = (*m1.shape[:-1], m2.shape[-1])
+        elif self.name in ("unary",):
+            shape = self.inputs[0].shape
+        elif self.name in ("elementwise",):
+            shape = tuple(-1 if -1 in (i0, i1) else max(i0, i1)
+                          for i0, i1 in zip(self.inputs[0].shape, self.inputs[1].shape))
+        elif self.name in ("reduce",):
+            shape = list(self.inputs[0].shape)
+            axes = self.inputs[2]
+            keep_dims = self.inputs[3]
+            assert isinstance(keep_dims, bool)
+            axes_list = []
+            for i in range(400):
+                ij = (1 << i)
+                if (axes & ij) != 0:
+                    axes_list.append(i)
+                if ij > axes:
+                    break
+            for axis in axes_list:
+                shape[axis] = 1 if keep_dims else None
+            shape = tuple(d for d in shape if d is not None)
+        elif self.name in ("concatenation",):
+            cats = self.inputs[0]
+            shape = list(cats[0].shape)
+            cataxis = [inp.shape[self.axis] for inp in cats]
+            if -1 in cataxis:
+                shape[self.axis] = -1
+            else:
+                shape[self.axis] = sum(cataxis)
+        else:
+            print(f"no mock shape for {self.name}")
+        assert shape is not None, "shape mocking failed"
+        return tuple(map(int, shape))
+
     def get_output(self, i):
         iten = ITensor()
-        if self.output_shape is not None:
-            iten.shape = self.output_shape
+        iten.shape = self.__find_shape()
         return iten
 
 
@@ -39,26 +105,18 @@ class INetworkDefinition:
 
     def __getattr__(self, name):
         if name[:4] == "add_":
+            return make_add_layer_func(name[4:])
 
-            def add_layer(*inputs, **kwargs):
-                layer = ILayer()
-                layer.inputs = inputs + tuple(kwargs.values())
-                layer_name = name[4:]
-                if layer_name in ("elementwise", "scale"):
-                    layer.output_shape = inputs[0].shape
-                elif layer_name in ("constant",):
-                    layer.output_shape = inputs[1].shape
-                else:
-                    try:
-                        layer.output_shape = inputs[0].shape
-                    except:
-                        try:
-                            layer.output_shape = kwargs["inputs"][0].shape
-                        except:
-                            pass
-                return layer
 
-            return add_layer
+def make_add_layer_func(layer_name):
+    def add_layer(*inputs, **kwargs):
+        layer = ILayer()
+        layer.name = layer_name
+        layer.inputs = inputs + tuple(kwargs.values())
+        layer.kwargs = kwargs
+        return layer
+
+    return add_layer
 
 
 class ILoop(ILayer):
@@ -72,7 +130,7 @@ class ILoop(ILayer):
 class ITensor:
     def __init__(self):
         # self.name = ""
-        self.shape = (0,)
+        self.shape = None
         self.dtype = DataType.HALF
 
 
@@ -96,7 +154,7 @@ class Builder:
 
 
 class IOptimizationProfile:
-    def set_shape(self, name, shape):
+    def set_shape(self, name, min_, max_, opt_):
         pass
 
 

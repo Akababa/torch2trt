@@ -15,22 +15,8 @@ def get_output_v2(*args, **kwargs):
     return output
 
 
-# Wrap torch.Tensor.size to return a tensor instead of an int when calling size(_int)
-@functools.wraps(tensor_size_old)
-def tensor_size_v2(*args, **kwargs):
-    output = tensor_size_old(*args, **kwargs)
-    if isinstance(output, int):
-        output = torch.tensor(output)
-    else:
-        output = tuple(torch.tensor(d) for d in output)
-    return output
-    # return torch.tensor(tensor_size_old(*args, **kwargs), dtype=torch.int32)
-
-
 trt.ILayer.get_output = get_output_v2
-print(f"Wrapped {get_output_old}")  # This should only be called once
-# torch.Tensor.size = tensor_size_v2
-# print(f"Wrapped {tensor_size_old}")  # This should only be called once
+print(f"Wrapped {get_output_old} - This should only be called once")
 
 
 def torch_dtype_to_trt(dtype):

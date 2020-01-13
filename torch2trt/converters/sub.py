@@ -1,27 +1,17 @@
 from ..conversion_context import *
 from torch2trt.module_test import add_module_test
-
+from .binary import convert_binary_elementwise
 
 @tensorrt_converter('torch.sub')
 @tensorrt_converter('torch.Tensor.__isub__')
 @tensorrt_converter('torch.Tensor.__sub__')
 def convert_sub(ctx):
-    input_a = ctx.method_args[0]
-    input_b = ctx.method_args[1]
-    input_a_trt, input_b_trt = ctx.get_trt_tensor(input_a, input_b)
-    output = ctx.method_return
-    layer = ctx.network.add_elementwise(input_a_trt, input_b_trt, trt.ElementWiseOperation.SUB)
-    output._trt = layer.get_output(0)
+    convert_binary_elementwise(ctx, trt.ElementWiseOperation.SUB)
 
     
 @tensorrt_converter('torch.Tensor.__rsub__')
 def convert_sub(ctx):
-    input_a = ctx.method_args[1]
-    input_b = ctx.method_args[0]  # flipped for rsub
-    input_a_trt, input_b_trt = ctx.get_trt_tensor(input_a, input_b)
-    output = ctx.method_return
-    layer = ctx.network.add_elementwise(input_a_trt, input_b_trt, trt.ElementWiseOperation.SUB)
-    output._trt = layer.get_output(0)
+    convert_binary_elementwise(ctx, trt.ElementWiseOperation.SUB, flip=True)
     
 
 class Sub(torch.nn.Module):

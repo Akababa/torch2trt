@@ -5,7 +5,7 @@ from ..conversion_context import *
 def convert_ConvTranspose2d(ctx):
     module = ctx.method_args[0]
     input = ctx.method_args[1]
-    input_trt = ctx.get_trt_tensor(input)
+    input_trt = ctx.get_trt_one(input)
     output = ctx.method_return
 
     kernel_size = module.kernel_size

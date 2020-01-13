@@ -3,11 +3,12 @@ from torch2trt.module_test import add_module_test
 
 
 @tensorrt_converter('torch.nn.ReLU6.forward')
-def convert_ReLU6(ctx):
-    input = ctx.method_args[1]
+def convert_ReLU6(ctx: ConversionContext):
+    input_trt = ctx.get_arg("input", 1, to_trt=True)
+    const_6_trt = ctx.get_trt_one(6.0)
     output = ctx.method_return
 
-    input_trt, trt_6 = ctx.get_trt_tensor(input, 6)
+    input_trt, trt_6 = ctx.broadcast_together(input_trt, const_6_trt)
 
     layer = ctx.network.add_activation(
         input=input_trt, type=trt.ActivationType.RELU)

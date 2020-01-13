@@ -5,21 +5,22 @@ from torch2trt.module_test import add_module_test
 @tensorrt_converter('torch.nn.functional.normalize')
 def convert_normalize(ctx: ConversionContext):
     # get args
-    input = ctx.get_arg('input', pos=0, default=None)
+    input_trt = ctx.get_arg('input', pos=0, default=None, to_trt=True)
     p = ctx.get_arg('p', pos=1, default=2)
-    dim = ctx.get_trt_dim(pos=2, default=1)
-    eps = ctx.get_arg('eps', pos=3, default=1e-12)
+    dim = ctx.get_trt_dim(pos=2, default=1, ndims=len(input_trt.shape))
+    eps_trt = ctx.get_arg('eps', pos=3, default=1e-12, to_trt=True)
 
     #     input_trt = input._trt
     output = ctx.method_return
-
+    p_trt = ctx.get_trt_one(p)
+    p_inv_trt = ctx.get_trt_one(1.0 / p)
     # add broadcastable scalar constants to network
-    input_trt, eps_trt, p_trt, p_inv_trt = ctx.get_trt_tensor(input, eps, p, 1.0 / p)
+    input_trt, eps_trt, p_trt, p_inv_trt = ctx.broadcast_together(input_trt, eps_trt, p_trt, p_inv_trt)
 
     # compute norm = sum(abs(x)**p, dim=dim)**(1./p)
     norm = ctx.network.add_unary(input_trt, trt.UnaryOperation.ABS).get_output(0)
     norm = ctx.network.add_elementwise(norm, p_trt, trt.ElementWiseOperation.POW).get_output(0)
-    norm = ctx.network.add_reduce(norm, trt.ReduceOperation.SUM, ctx.get_trt_axes(torch_dim=dim),
+    norm = ctx.network.add_reduce(norm, trt.ReduceOperation.SUM, ctx.get_trt_axes(dim, None),
                                   keep_dims=True).get_output(0)
     norm = ctx.network.add_elementwise(norm, p_inv_trt, trt.ElementWiseOperation.POW).get_output(0)
 

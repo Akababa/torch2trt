@@ -16,7 +16,7 @@ def get_interpolate_plugin(size, mode, align_corners):
 @tensorrt_converter('torch.nn.functional.interpolate')
 def convert_interpolate(ctx):
     input = ctx.method_args[0]
-    input_trt = ctx.get_trt_tensor(input)
+    input_trt = ctx.get_trt_one(input)
     output = ctx.method_return
 
     try:

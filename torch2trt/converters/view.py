@@ -2,18 +2,33 @@ from ..conversion_context import *
 from torch2trt.module_test import add_module_test
 
 
-@tensorrt_converter('torch.flatten')
+# ASSUME EXPLICIT BATCH MODE to make things easier for now
+
+
 @tensorrt_converter('torch.Tensor.reshape')
 @tensorrt_converter('torch.Tensor.view')
-@tensorrt_converter('torch.Tensor.squeeze')
-@tensorrt_converter('torch.Tensor.unsqueeze')
 def convert_view(ctx: ConversionContext):
-    input = ctx.method_args[0]
-    input_trt = ctx.get_trt_tensor(input)
+    input_trt = ctx.get_arg(None, pos=0, to_trt=True)
+    new_shape = ctx.method_args[1:]
+
     output = ctx.method_return
-    layer = ctx.network.add_shuffle(input_trt)
-    layer.reshape_dims = tuple(output.shape[ctx.nonbatch_dim:])  # TRT tensors have no batch dim (always implicit)
-    output._trt = layer.get_output(0)
+    output._trt = ctx.reshape_to(input_trt, new_shape)
+
+
+# @tensorrt_converter('torch.Tensor.squeeze')
+@tensorrt_converter('torch.Tensor.unsqueeze')
+def convert_squeeze(ctx: ConversionContext):
+    input_trt = ctx.get_arg("input", 0, to_trt=True)
+    new_dim = ctx.get_trt_dim(pos=1, ndims=len(input_trt.shape))
+
+    new_shape = list(input_trt.shape)
+    new_shape.insert(new_dim, 1)
+
+    output = ctx.method_return
+    output._trt = ctx.reshape_to(input_trt, new_shape)
+
+
+# @tensorrt_converter('torch.flatten')
 
 
 class View(torch.nn.Module):
@@ -23,7 +38,6 @@ class View(torch.nn.Module):
 
     def forward(self, x):
         return x.view(*self.dims)
-
 
 
 @add_module_test(torch.float32, torch.device('cuda'), [(1, 3)])

@@ -5,7 +5,7 @@ from torch2trt.module_test import add_module_test
 @tensorrt_converter('torch.nn.functional.pad')
 def convert_pad(ctx):
     input = ctx.method_args[0]
-    input_trt = ctx.get_trt_tensor(input)
+    input_trt = ctx.get_trt_one(input)
     output = ctx.method_return
     
     pad = ctx.method_args[1]

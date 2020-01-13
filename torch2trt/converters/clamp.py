@@ -20,7 +20,7 @@ def __add_clamp(network, trt_input, val, op):
 @tensorrt_converter('torch.Tensor.clamp_min')
 def convert_clamp_min(ctx):
     input = ctx.method_args[0]
-    input_trt = ctx.get_trt_tensor(input)
+    input_trt = ctx.get_trt_one(input)
     val = ctx.method_args[1]
     output = ctx.method_return
     

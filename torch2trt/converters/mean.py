@@ -1,21 +1,12 @@
 from ..conversion_context import *
 from torch2trt.module_test import add_module_test
+from .binary import convert_binary_reduce
 
 
 @tensorrt_converter('torch.mean')
 @tensorrt_converter('torch.Tensor.mean')
 def convert_mean(ctx: ConversionContext):
-    input = ctx.method_args[0]
-    input_trt = ctx.get_trt_tensor(input)
-    output = ctx.method_return
-
-    dim = ctx.get_trt_dim()
-
-    # get whether to keep dimensions
-    keepdim = ctx.get_arg('keepdim', pos=2, default=False)
-
-    layer = ctx.network.add_reduce(input_trt, trt.ReduceOperation.AVG, ctx.get_trt_axes(dim), keepdim)
-    output._trt = layer.get_output(0)
+    convert_binary_reduce(ctx, trt.ReduceOperation.AVG)
 
 
 class Mean(torch.nn.Module):

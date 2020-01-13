@@ -45,7 +45,7 @@ def convert_tensor_getitem(ctx: ConversionContext):
         slices = (slices,)
     output = ctx.method_return
 
-    input_trt = ctx.get_trt_tensor(input)  # may or may not have a batch dim
+    input_trt = ctx.get_trt_one(input)  # may or may not have a batch dim
     is_const = len(input_trt.shape) == input.dim()  # Only constant tensors have the batch axis
 
     # Step 1 - Replace ellipsis with expanded slices
@@ -75,6 +75,7 @@ def convert_tensor_getitem(ctx: ConversionContext):
     # print("input_trt shape:", input_trt.shape)
     assert len(new_slices) == input.dim()
 
+    # # Step 2 - Remove batch from slices (TRT from this point)
     if not is_const:
         if new_slices[0] != slice(None, None, None):
             raise ValueError(f"can't slice on batch dimension")  # TODO actually I can in explicit mode
@@ -82,11 +83,7 @@ def convert_tensor_getitem(ctx: ConversionContext):
         # print("new_slices shrink to:", new_slices)
         assert len(new_slices) == len(input_trt.shape)
 
-    # # Step 2 - Remove batch from slices (TRT from this point)
-    # slices = tuple(new_slices[1:]) # remove batch
-
-    # Step 3 - Add slice layer (will currently ignore 'None' slices)
-
+    # Step 3 - Add slice layer
     starts, sizes, strides = [], [], []
     # input_trt_shape = ctx.network.add_shape(input_trt).get_output(0)
     for i, (s, input_size) in enumerate(zip(new_slices, input_trt.shape)):

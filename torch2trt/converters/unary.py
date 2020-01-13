@@ -4,7 +4,7 @@ from torch2trt.module_test import add_module_test
         
 def __convert_unary(ctx, op):
     input = ctx.get_arg('input', pos=0, default=None)
-    input_trt = ctx.get_trt_tensor(input)
+    input_trt = ctx.get_trt_one(input)
     output = ctx.method_return
     layer = ctx.network.add_unary(input_trt, op)
     output._trt = layer.get_output(0)

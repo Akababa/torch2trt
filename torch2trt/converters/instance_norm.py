@@ -58,7 +58,7 @@ def convert_instance_norm(ctx: ConversionContext):
 
         eps_np = np.array([eps], dtype=np.float32)
         keep_dims = True
-        reduce_axes = ctx.get_trt_axes(torch_dim=tuple(range(2, input.ndim)))
+        reduce_axes = ctx.get_trt_axes(tuple(range(2, input.ndim)), None)
 
         # compute mean over spatial
         mean_trt = ctx.network.add_reduce(input._trt, trt.ReduceOperation.AVG, reduce_axes, keep_dims).get_output(0)

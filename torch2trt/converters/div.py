@@ -1,6 +1,6 @@
 from ..conversion_context import *
 from torch2trt.module_test import add_module_test
-
+from .binary import convert_binary_elementwise
 
 @tensorrt_converter('torch.div')
 @tensorrt_converter('torch.Tensor.__div__') # py2
@@ -8,23 +8,14 @@ from torch2trt.module_test import add_module_test
 @tensorrt_converter('torch.Tensor.__truediv__') # py3
 @tensorrt_converter('torch.Tensor.__itruediv__') # py3
 def convert_div(ctx):
-    input_a = ctx.method_args[0]
-    input_b = ctx.method_args[1]
-    input_a_trt, input_b_trt = ctx.get_trt_tensor(input_a, input_b)
-    output = ctx.method_return
-    layer = ctx.network.add_elementwise(input_a_trt, input_b_trt, trt.ElementWiseOperation.DIV)
-    output._trt = layer.get_output(0)
+    convert_binary_elementwise(ctx, trt.ElementWiseOperation.DIV)
 
 
 @tensorrt_converter('torch.Tensor.__rdiv__') # py2
 @tensorrt_converter('torch.Tensor.__rtruediv__') # py3
 def convert_rdiv(ctx):
-    input_a = ctx.method_args[1]  # inputs switched for rdiv
-    input_b = ctx.method_args[0]
-    input_a_trt, input_b_trt = ctx.get_trt_tensor(input_a, input_b)
-    output = ctx.method_return
-    layer = ctx.network.add_elementwise(input_a_trt, input_b_trt, trt.ElementWiseOperation.DIV)
-    output._trt = layer.get_output(0)
+    convert_binary_elementwise(ctx, trt.ElementWiseOperation.DIV, flip=True)
+
     
 
 class Div(torch.nn.Module):

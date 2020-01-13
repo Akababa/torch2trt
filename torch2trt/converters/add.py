@@ -1,18 +1,13 @@
 from ..conversion_context import *
 from torch2trt.module_test import add_module_test
-
+from .binary import convert_binary_elementwise
 
 @tensorrt_converter('torch.add')
 @tensorrt_converter('torch.Tensor.__iadd__')
 @tensorrt_converter('torch.Tensor.__add__')
 @tensorrt_converter('torch.Tensor.__radd__')
 def convert_add(ctx):
-    input_a = ctx.method_args[0]
-    input_b = ctx.method_args[1]
-    input_a_trt, input_b_trt = ctx.get_trt_tensor(input_a, input_b)
-    output = ctx.method_return
-    layer = ctx.network.add_elementwise(input_a_trt, input_b_trt, trt.ElementWiseOperation.SUM)
-    output._trt = layer.get_output(0)
+    convert_binary_elementwise(ctx, trt.ElementWiseOperation.SUM)
     
 
 class Add(torch.nn.Module):

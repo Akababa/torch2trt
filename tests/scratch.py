@@ -10,11 +10,11 @@ import gpt2
 
 torch.manual_seed(0)
 
-past_dummy_seq_length = 1
-input_dummy_seq_length = 1
-ex_batch_size = 1
+past_dummy_seq_length = 7
+input_dummy_seq_length = 11
+ex_batch_size = 5
 
-config = gpt2.GPT2Config(n_layer=1, n_head=2, n_embd=434, vocab_size=10)
+config = gpt2.GPT2Config(n_layer=13, n_head=2, n_embd=4, vocab_size=10)
 model = gpt2.GPT2LMHeadModel(config)
 # [batch, heads, sequence, embed]
 past_dummy_shape = (ex_batch_size, config.n_head, past_dummy_seq_length, config.n_embd // config.n_head)

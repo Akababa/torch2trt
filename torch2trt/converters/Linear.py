@@ -3,20 +3,19 @@ from torch2trt.module_test import add_module_test
 
 
 @tensorrt_converter('torch.nn.Linear.forward')
-def convert_Linear(ctx):
+def convert_Linear(ctx: ConversionContext):
     module = ctx.method_args[0]
-    input = ctx.method_args[1]
-    input_trt = ctx.get_trt_tensor(input)
+    input_trt = ctx.get_arg("input", 1, to_trt=True)
     output = ctx.method_return
 
     # reshape to ...xNx1x1
     layer = ctx.network.add_shuffle(input_trt)
-    layer.reshape_dims = tuple(input_trt.shape) + (1, 1) 
+    layer.reshape_dims = tuple(input_trt.shape) + (1, 1)
 
     bias = trt.Weights(torch_dtype_to_trt(module.weight.dtype))
     if module.bias is not None:
         bias = module.bias.detach().cpu().numpy()
-        
+
     # add fully connected
     layer = ctx.network.add_fully_connected(
         input=layer.get_output(0),
