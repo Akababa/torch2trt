@@ -14,7 +14,7 @@ def convert_BatchNorm2d(ctx: ConversionContext):
     power = np.ones_like(scale)
 
     # reshape to 2D
-    layer = ctx.network.add_shuffle(input_trt)
+    # layer = ctx.network.add_shuffle(input_trt)
 
     if len(input.shape) == 2:
         reshape_dims = (input.shape[1], 1, 1)
@@ -22,15 +22,14 @@ def convert_BatchNorm2d(ctx: ConversionContext):
         reshape_dims = (input.shape[1], input.shape[2], 1)
     if ctx.has_implicit_batch():
         reshape_dims = (input.shape[0],) + reshape_dims
-    layer.reshape_dims = reshape_dims
+    # layer.reshape_dims = reshape_dims
+    input_trt_2d = ctx.reshape_to(input_trt, reshape_dims)
 
-    layer = ctx.network.add_scale(layer.get_output(0), trt.ScaleMode.CHANNEL, bias, scale, power)
+    layer = ctx.network.add_scale(input_trt_2d, trt.ScaleMode.CHANNEL, bias, scale, power)
 
     # reshape back to 1D
-    layer = ctx.network.add_shuffle(layer.get_output(0))
-    layer.reshape_dims = tuple(output.shape[ctx.nonbatch_dim:])
 
-    output._trt = layer.get_output(0)
+    output._trt = ctx.reshape_to(layer.get_output(0), tuple(output.shape[ctx.nonbatch_dim:]))
 
 
 @add_module_test(torch.float32, torch.device('cuda'), [(1, 10)])

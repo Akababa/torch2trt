@@ -1,5 +1,5 @@
 from ..conversion_context import *
-
+from .view import insert_dim
 
 @tensorrt_converter('torch.cat')
 def convert_cat(ctx: ConversionContext):
@@ -19,14 +19,11 @@ def convert_cat(ctx: ConversionContext):
     trt_inputs = [ctx.get_trt_one(inp) for inp in inputs]
 
     ndims = len(trt_inputs[0].shape)  # before stack
-    axis = ctx.get_trt_dim(pos=1, default=0, ndims=ndims)
+    new_axis = ctx.get_trt_dim(pos=1, default=0, ndims=ndims)
 
-    rshape = list(trt_inputs[0].shape)
-    rshape.insert(axis, 1)
-
-    trt_inputs_unsqueezed = [ctx.reshape_to(tt, rshape) for tt in trt_inputs]
+    trt_inputs_unsqueezed = [insert_dim(ctx, tt, new_axis) for tt in trt_inputs]
 
     layer = ctx.network.add_concatenation(trt_inputs_unsqueezed)
-    layer.axis = axis
+    layer.axis = new_axis
     output = ctx.method_return
     output._trt = layer.get_output(0)

@@ -22,6 +22,7 @@ def convert_split(ctx: ConversionContext):
 
     # add slice layers
     for i, output in enumerate(outputs):
+        # TODO use dynamic shape..
         shape = list(output.shape[ctx.nonbatch_dim:])  # exclude batch dim
         start[trt_dim] = offset
         layer = ctx.network.add_slice(input_trt, start, shape, stride)

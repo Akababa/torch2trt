@@ -7,28 +7,6 @@ from typing import Union, Tuple, Dict, Optional
 CONVERTERS = {}
 
 
-# Assume there will NEVER be a dynamic dim index
-def _fix_dim(dim, ndims: Optional[int]):
-    if dim is None:
-        return dim
-    if dim == "_all":
-        assert isinstance(ndims, int)
-        return tuple(range(ndims))
-
-    def helper(d):
-        if d < 0:
-            d = ndims + d
-        assert 0 <= d
-        assert ndims is None or d < ndims
-        return d
-
-    if isinstance(dim, int):
-        return helper(dim)
-    else:
-        assert isinstance(dim, list) or isinstance(dim, tuple)
-        return tuple(helper(d) for d in dim)
-
-
 # put constants with batch dim?
 # TODO FIX this by comparing dim sizes of input and input._trt!
 class ConversionContext(object):
@@ -114,6 +92,7 @@ class ConversionContext(object):
         return trt_tensor
 
     def reshape_to(self, trt_tensor: trt.ITensor, new_shape):
+        assert new_shape.count(-1) <= 1
         layer = self.network.add_shuffle(trt_tensor)
         layer.reshape_dims = new_shape
         return layer.get_output(0)
@@ -251,6 +230,34 @@ class ConversionHook(object):
             self._set_method(self.method_impl)
 
 
+def shape_ok(t: torch.Tensor):
+    assert isinstance(t, torch.Tensor)
+    return all(torch_d == trt_d or trt_d == -1 for torch_d, trt_d in
+               zip(t.shape, t._trt.shape))
+
+
+# Assume there will NEVER be a dynamic dim index
+def _fix_dim(dim, ndims: Optional[int]):
+    if dim is None:
+        return dim
+    if dim == "_all":
+        assert isinstance(ndims, int)
+        return tuple(range(ndims))
+
+    def helper(d):
+        if d < 0:
+            d = ndims + d
+        assert 0 <= d
+        assert ndims is None or d < ndims
+        return d
+
+    if isinstance(dim, int):
+        return helper(dim)
+    else:
+        assert isinstance(dim, list) or isinstance(dim, tuple)
+        return tuple(helper(d) for d in dim)
+
+
 def _attach_converter(ctx: ConversionContext, method, converter, method_str):
     """Gets a function that executes PyTorch method and TensorRT converter"""
     global DUMMY_CONVERTERS
@@ -265,12 +272,25 @@ def _attach_converter(ctx: ConversionContext, method, converter, method_str):
             skip = False
 
         # run original method
-        outputs = method(*args, **kwargs)
+        outputs_orig = method(*args, **kwargs)
+        outputs = outputs_orig
 
         if not skip:
             ctx.setup_method(args, kwargs, outputs, method_str)
             if converter["is_real"]:
-                print(f"Converting {method_str}...")
+                def stringer(t):
+                    if isinstance(t, torch.Tensor):
+                        return f"Tensor({tuple(t.shape)})"
+                    elif isinstance(t, list) or isinstance(t, tuple):
+                        return f"{type(t).__name__}[{stringer(t[0]) if len(t) > 0 else 'EMPTY'}]"
+                    else:
+                        return type(t).__name__
+
+                print("Converting {0}({1})".format(
+                    method_str,
+                    ", ".join(list(map(stringer, args)) +
+                              list(f"{k}={stringer(v)}" for k, v in kwargs.items()))
+                ))
 
             converter['converter'](ctx)
 
@@ -283,15 +303,20 @@ def _attach_converter(ctx: ConversionContext, method, converter, method_str):
                 def _check_shape_recursive(outputs_recurse, pos=()):
                     # Checks for corrupted converter trt tensor outputs, since python api/abi doesn't do so
                     if isinstance(outputs_recurse, int) or isinstance(outputs_recurse, float):
+                        expected = outputs_orig
+                        for p in pos:
+                            expected = expected[p]
+                        assert outputs_recurse == expected
+                        print(f"Output const {outputs_recurse}, {type(outputs_recurse).__name__}\n"
+                              f"matched expected")
                         return
                     if isinstance(outputs_recurse, torch.Tensor):
                         if hasattr(outputs_recurse, "_trt"):
                             try:
                                 len(outputs_recurse._trt.shape)  # This will crash python without exception handling
-                                assert all(torch_d == trt_d or trt_d == -1 for torch_d, trt_d in
-                                           zip(outputs_recurse.shape, outputs_recurse._trt.shape))
-                                print(f"Output shape     {tuple(outputs_recurse._trt.shape)}\n"
-                                      f"matched expected {tuple(outputs_recurse.shape)}")
+                                assert shape_ok(outputs_recurse)
+                                print(f"Output shape     {tuple(outputs_recurse._trt.shape)}, {outputs_recurse._trt.dtype}\n"
+                                      f"matched expected {tuple(outputs_recurse.shape)}, {outputs_recurse.dtype}")
                             except Exception as e:
                                 print(f"Error: wrong shape on output {pos} of {method_str}:\n"
                                       f"expected:{tuple(outputs_recurse.shape)}\n"

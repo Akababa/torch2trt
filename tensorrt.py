@@ -33,12 +33,14 @@ class ILayer:
         elif self.name in ("slice",):
             shape = self.inputs[2]
         elif self.name in ("shuffle",):
+            shape = self.inputs[0].shape
+            if hasattr(self, "first_transpose"):
+                shape = [shape[i] for i in self.first_transpose]
             if hasattr(self, "reshape_dims"):
-                shape = self.reshape_dims
-            else:
-                shape = self.inputs[0].shape
-                if hasattr(self, "first_transpose"):
-                    shape = [shape[i] for i in self.first_transpose]
+                newshape = []
+                for i, d in enumerate(self.reshape_dims):
+                    newshape.append(shape[i] if d == 0 else d)
+                shape = newshape
             if hasattr(self, "second_transpose"):
                 shape = [shape[i] for i in self.second_transpose]
         elif self.name in ("gather",):

@@ -21,11 +21,12 @@ def convert_Conv1d(ctx):
         bias = module.bias.detach().cpu().numpy()
         
     # reshape to 2D
-    layer = ctx.network.add_shuffle(input_trt)
-    layer.reshape_dims = (-1, input.shape[-1], 1)
+    input_trt_2d = ctx.reshape_to(input_trt, (-1, input.shape[-1], 1))
+    # layer = ctx.network.add_shuffle(input_trt)
+    # layer.reshape_dims = (-1, input.shape[-1], 1)
     
     layer = ctx.network.add_convolution(
-        input=layer.get_output(0),
+        input=input_trt_2d,
         num_output_maps=module.out_channels,
         kernel_shape=kernel_size,
         kernel=kernel,
@@ -38,10 +39,11 @@ def convert_Conv1d(ctx):
         layer.num_groups = module.groups
         
     # reshape back to 1D
-    layer = ctx.network.add_shuffle(layer.get_output(0))
-    layer.reshape_dims = (-1, output.shape[-1])
 
-    output._trt = layer.get_output(0)
+    # layer = ctx.network.add_shuffle(layer.get_output(0))
+    # layer.reshape_dims = (-1, output.shape[-1])
+
+    output._trt = ctx.reshape_to(layer.get_output(0), (-1, output.shape[-1]))
 
 
 @add_module_test(torch.float32, torch.device('cuda'), [(1, 10, 224)])

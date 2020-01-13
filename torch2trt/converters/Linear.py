@@ -9,25 +9,21 @@ def convert_Linear(ctx: ConversionContext):
     output = ctx.method_return
 
     # reshape to ...xNx1x1
-    layer = ctx.network.add_shuffle(input_trt)
-    layer.reshape_dims = tuple(input_trt.shape) + (1, 1)
+    input_trt_n11 = ctx.reshape_to(input_trt, tuple(input_trt.shape) + (1, 1))
 
     bias = trt.Weights(torch_dtype_to_trt(module.weight.dtype))
     if module.bias is not None:
         bias = module.bias.detach().cpu().numpy()
 
     # add fully connected
-    layer = ctx.network.add_fully_connected(
-        input=layer.get_output(0),
+    fc_out_trt = ctx.network.add_fully_connected(
+        input=input_trt_n11,
         num_outputs=module.out_features,
         kernel=module.weight.detach().cpu().numpy(),
-        bias=bias)
+        bias=bias).get_output(0)
 
     # reshape back to N
-    layer = ctx.network.add_shuffle(layer.get_output(0))
-    layer.reshape_dims = tuple(output.shape[ctx.nonbatch_dim:])
-
-    output._trt = layer.get_output(0)
+    output._trt = ctx.reshape_to(fc_out_trt, tuple(output.shape[ctx.nonbatch_dim:]))
 
 
 @add_module_test(torch.float32, torch.device('cuda'), [(1, 10)])

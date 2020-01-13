@@ -116,11 +116,9 @@ def convert_tensor_getitem(ctx: ConversionContext):
     # Step 4 - Add shuffle layer to insert dimensions for 'None' slices and remove dimensions for 'int' slices
 
     # num_non_slice = len([s for s in new_slices if not isinstance(s, slice)])
-    if tuple(output_trt.shape) != tuple(output.shape):
-        layer = ctx.network.add_shuffle(output_trt)
-        # print("reshape to:", output.shape)
-        layer.reshape_dims = tuple(output.shape)  # don't exclude batch
-        output_trt = layer.get_output(0)
+    # if tuple(output_trt.shape) != tuple(output.shape):
+    #     # print("reshape to:", output.shape)
+    #     output_trt = ctx.reshape_to(output_trt, output.shape)
 
     output._trt = output_trt
 

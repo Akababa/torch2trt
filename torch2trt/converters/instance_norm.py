@@ -2,24 +2,26 @@ from ..conversion_context import *
 from torch2trt.module_test import add_module_test
 
 
-def _add_scale_1d2d3d(network, x_trt, mode, offset, scale, power):
+def _add_scale_1d2d3d(ctx, x_trt, mode, offset, scale, power):
     ndim = len(x_trt.shape)
 
     y_trt = x_trt
 
     # shape to 2D
     if ndim != 3:
-        layer = network.add_shuffle(y_trt)
-        layer.reshape_dims = (x_trt.shape[0], x_trt.shape[1], -1)  # NCH -> NCHW
-        y_trt = layer.get_output(0)
+        y_trt = ctx.reshape_to(y_trt, (x_trt.shape[0], x_trt.shape[1], -1))
+        # layer = network.add_shuffle(y_trt)
+        # layer.reshape_dims = (x_trt.shape[0], x_trt.shape[1], -1)  # NCH -> NCHW
+        # y_trt = layer.get_output(0)
 
-    y_trt = network.add_scale(y_trt, mode, offset, scale, power).get_output(0)
+    y_trt = ctx.network.add_scale(y_trt, mode, offset, scale, power).get_output(0)
 
     # shape to original dimension
     if ndim != 3:
-        layer = network.add_shuffle(layer.get_output(0))
-        layer.reshape_dims = tuple(x_trt.shape)
-        y_trt = layer.get_output(0)
+        y_trt = ctx.reshape_to(y_trt, tuple(x_trt.shape))
+        # layer = network.add_shuffle(layer.get_output(0)) # Bug??
+        # layer.reshape_dims = tuple(x_trt.shape)
+        # y_trt = layer.get_output(0)
 
     return y_trt
 
@@ -49,7 +51,7 @@ def convert_instance_norm(ctx: ConversionContext):
             scale *= weight.detach().cpu().numpy()
             offset += bias.detach().cpu().numpy()
 
-        result_trt = _add_scale_1d2d3d(ctx.network, input._trt, trt.ScaleMode.CHANNEL, offset, scale, power)
+        result_trt = _add_scale_1d2d3d(ctx, input._trt, trt.ScaleMode.CHANNEL, offset, scale, power)
 
         output._trt = result_trt
 
@@ -81,7 +83,7 @@ def convert_instance_norm(ctx: ConversionContext):
             weight_np = weight.detach().cpu().numpy()
             bias_np = bias.detach().cpu().numpy()
 
-            result_trt = _add_scale_1d2d3d(ctx.network, result_trt, trt.ScaleMode.CHANNEL, bias_np, weight_np,
+            result_trt = _add_scale_1d2d3d(ctx, result_trt, trt.ScaleMode.CHANNEL, bias_np, weight_np,
                                            np.ones_like(bias_np))
 
         output._trt = result_trt
