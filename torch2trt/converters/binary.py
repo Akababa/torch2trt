@@ -24,7 +24,7 @@ def convert_binary_reduce(ctx: ConversionContext, trt_op: trt.ElementWiseOperati
     input_trt = ctx.get_arg("input", 0, to_trt=True)
     dim = ctx.get_trt_dim("dim", 1, default="_all", ndims=len(input_trt.shape))
     keepdim = ctx.get_arg('keepdim', pos=2, default=False)
-    output_val = ctx.method_return[0]
-    output_idx = ctx.method_return[1]  # Hmmmm..
+    output_val = ctx.method_return  # [0]
+    # output_idx = ctx.method_return[1]  # Hmmmm..
     layer = ctx.network.add_reduce(input_trt, trt_op, ctx.get_trt_axes(dim, ndims=None), keepdim)
     output_val._trt = layer.get_output(0)

@@ -253,7 +253,7 @@ class GPT2Model(GPT2PreTrainedModel):
             presents.append(present)
 
         hidden_states = self.ln_f(hidden_states)
-        hidden_states = hidden_states.view(batch_size, input_len, self.config.n_embd)
+        # hidden_states = hidden_states.view(batch_size, input_len, self.config.n_embd)
 
         return hidden_states, torch.stack(presents)
 
