@@ -3,22 +3,26 @@ import torch
 import functools
 
 get_output_old = trt.ILayer.get_output
-tensor_size_old = torch.Tensor.size
 
 
 # Wrap tensorrt.ILayer.get_output for better error checking and debugging
 @functools.wraps(get_output_old)
-def get_output_v2(*args, **kwargs):
+def __get_output_v2(*args, **kwargs):
     # allargs = tuple(args) + tuple(kwargs.values())
     # print(allargs)
     output = get_output_old(*args, **kwargs)
     print(f"  Added {args[0].__class__.__name__}: got output shape {output.shape}, dtype {output.dtype}")
-    assert len(output.shape) >= 0  # If this fails, check if the inputs to the ILayer match the documentation
+    assert output.shape.__len__() >= 0, "Invalid ILayer inputs"
     return output
 
 
-trt.ILayer.get_output = get_output_v2
-print(f"Wrapped {get_output_old} - This should only be called once")
+def wrap_get_output():
+    trt.ILayer.get_output = __get_output_v2
+    print(f"Wrapped {get_output_old} - This should only be called once")
+
+
+def unwrap_get_output():
+    trt.ILayer.get_output = get_output_old
 
 
 def torch_dtype_to_trt(dtype):

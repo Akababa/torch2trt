@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 import tensorrt as trt
 from .trt_module import TRTModule
@@ -8,7 +9,7 @@ from .conversion_context import ConversionContext
 def torch2trt(module,
               inputs,
               input_names=None,
-              input_shapes=None,  # for dynamic
+              optimization_profile=None,  # Required for dynamic
               output_names=None,
               log_level=trt.Logger.ERROR,
               max_batch_size=1,
@@ -19,19 +20,30 @@ def torch2trt(module,
               int8_mode=False,
               int8_calib_dataset=None,
               int8_calib_algorithm=DEFAULT_CALIBRATION_ALGORITHM,
-              build_flags=0b0,
-              optimization_profile=None):
+              build_flags=(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)),
+              ):
     inputs_in = inputs
-
-    # copy inputs to avoid modifications to source data
-    # inputs = [tensor.clone()[0:1] for tensor in inputs]  # only run single entry ??
-
     logger = trt.Logger(log_level)
     builder = trt.Builder(logger)
+
+    # Infer input shapes (dynamic) and make optimization profile
+    input_shapes = [list(inp.shape) for inp in inputs]
+    config = builder.create_builder_config()
+    if optimization_profile is not None:
+        profile = builder.create_optimization_profile()
+        for name, shapelims, inp_shape in zip(input_names, optimization_profile, input_shapes):
+            mins, opts, maxs = np.array(shapelims)
+            assert all(mins <= opts) and all(opts <= maxs)
+            assert all(mins <= inp_shape) and all(inp_shape <= maxs)
+            profile.set_shape(name, min=shapelims[0], opt=shapelims[1], max=shapelims[2])
+            for d, (mind, maxd) in enumerate(zip(shapelims[0], shapelims[2])):
+                if mind != maxd:
+                    inp_shape[d] = -1
+        config.add_optimization_profile(profile)
+
     network = builder.create_network(flags=build_flags)
 
     with ConversionContext(network) as ctx:
-
         if isinstance(inputs, list):
             inputs = tuple(inputs)
         if not isinstance(inputs, tuple):
@@ -43,7 +55,7 @@ def torch2trt(module,
         else:
             outputs = module(**{name: value for name, value in zip(input_names, inputs)})
 
-        if not isinstance(outputs, tuple) and not isinstance(outputs, list):
+        if not isinstance(outputs, (tuple, list)):
             outputs = (outputs,)
         ctx.mark_outputs(outputs, output_names)
 
@@ -53,26 +65,15 @@ def torch2trt(module,
     builder.strict_type_constraints = strict_type_constraints
 
     if int8_mode:
-
         # default to use input tensors for calibration
         if int8_calib_dataset is None:
             int8_calib_dataset = TensorBatchDataset(inputs_in)
-
         builder.int8_mode = True
-
         # @TODO(jwelsh):  Should we set batch_size=max_batch_size?  Need to investigate memory consumption
         builder.int8_calibrator = DatasetCalibrator(inputs, int8_calib_dataset, batch_size=1,
                                                     algorithm=int8_calib_algorithm)
 
-    if optimization_profile is not None:
-        config = builder.create_builder_config()
-        profile = builder.create_optimization_profile()
-        for name, shapelims in optimization_profile.items():
-            assert len(shapelims) == 3, "need min, opt, max for optimization profile shapes"
-            profile.set_shape(name, *shapelims)
-        config.add_optimization_profile(profile)
-
-    engine = builder.build_cuda_engine(network)
+    engine = builder.build_engine(network, config)
     assert engine is not None, "build_cuda_network failed"
 
     module_trt = TRTModule(engine, ctx.input_names, ctx.output_names)

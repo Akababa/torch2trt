@@ -17,8 +17,21 @@ class ILayer:
         return self.inputs[i]
 
     def set_input(self, i, inp):
-        if self.name == "concatenation":
+        while len(self.inputs) <= i:
+            self.inputs.append(None)
+        self.inputs[i] = inp
+        if self.name == "shuffle":
+            if i == 1:
+                self.reshape_dims = inp
+        elif self.name == "concatenation":
             self.reshape_dims = inp
+        if self.name == "slice":
+            if i == 1:
+                self.start = inp
+            if i == 2:
+                self.size = inp
+            if i == 3:
+                self.stride = inp
 
     def __find_shape(self):
         shape = self.__yolo_shape()
@@ -30,9 +43,13 @@ class ILayer:
             self.torch_value = self.inputs[0].shape
         elif self.name in ("slice",):
             shape = self.inputs[2]
-            myslices = [slice(st, st + si, 1 if stride == 0 else stride) for st, si, stride in zip(*self.inputs[1:4])]
-            myslices = tuple(myslices) if len(myslices) > 1 else myslices[0]
-            self.torch_value = self.inputs[0].torch_value.__getitem__(myslices)
+            if shape == (1,):  # for slicing a shape tensor
+                myslices = [slice(st, st + si, 1 if stride == 0 else stride) for st, si, stride in
+                            zip(*self.inputs[1:4])]
+                myslices = tuple(myslices) if len(myslices) > 1 else myslices[0]
+                self.torch_value = self.inputs[0].torch_value.__getitem__(myslices)
+            else:
+                shape = shape.torch_value
         elif self.name in ("shuffle",):
             shape = self.inputs[0].shape
             if hasattr(self, "first_transpose"):
@@ -80,6 +97,8 @@ class ILayer:
                 shape[self.axis] = -1
             else:
                 shape[self.axis] = sum(cataxis)
+            if self.axis == 0 and cats[0].shape == (1,):
+                self.torch_value = np.concatenate([inp.torch_value for inp in cats], axis=self.axis)
         else:
             print(f"no mock shape for {self.name}")
         assert shape is not None, "shape mocking failed"
@@ -127,7 +146,7 @@ class ILayer:
         iten.shape = self.__find_shape()
         iten.dtype = self.dtype
         iten.torch_value = self.torch_value
-        iten.last_layer = self.name
+        iten.last_layer = self
         # if self.name == "concatenation":
 
         return iten
@@ -159,7 +178,7 @@ def make_add_layer_func(layer_name):
     def add_layer(*inputs, **kwargs):
         layer = ILayer()
         layer.name = layer_name
-        layer.inputs = inputs + tuple(kwargs.values())
+        layer.inputs = list(inputs) + list(kwargs.values())
         layer.kwargs = kwargs
         return layer
 
@@ -181,6 +200,14 @@ class ITensor:
         self.dtype = DataType.HALF
         self.torch_value = None
 
+    def __iter__(self):
+        return self.torch_value.__iter__()
+
+
+class IBuilderConfig:
+    def add_optimization_profile(self, prof):
+        pass
+
 
 class Builder:
     def __init__(self, logger):
@@ -195,6 +222,9 @@ class Builder:
         return IBuilderConfig()
 
     def build_cuda_engine(self, network: INetworkDefinition):
+        raise DeprecationWarning("doesn't work, see c++ docs")
+
+    def build_engine(self, network: INetworkDefinition, config: IBuilderConfig):
         return None
 
     def create_optimization_profile(self):
@@ -202,12 +232,7 @@ class Builder:
 
 
 class IOptimizationProfile:
-    def set_shape(self, name, min_, max_, opt_):
-        pass
-
-
-class IBuilderConfig:
-    def add_optimization_profile(self, prof):
+    def set_shape(self, name, min, opt, max):
         pass
 
 

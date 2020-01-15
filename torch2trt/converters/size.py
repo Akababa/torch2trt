@@ -1,6 +1,21 @@
 from ..conversion_context import *
 
 
+def get_tuple_of_shape(ctx, t: trt.ITensor):
+    # ndims = len(t.shape)
+    if -1 in t.shape:
+        trt_dyn_shape = ctx.network.add_shape(t).get_output(0)
+    new_output_trt = []
+    # Detect static/dynamic dims and output either python_int/trt_scalar
+    for idx, input_dim in enumerate(t.shape):
+        if input_dim == -1:  # make it a torch tensor and add ._trt attribute to it
+            output_dim_trt = ctx.get_dim_of_shape(trt_dyn_shape, idx)
+            new_output_trt.append(output_dim_trt)
+        else:
+            new_output_trt.append(input_dim)
+    return tuple(new_output_trt)
+
+
 @tensorrt_converter('torch.Tensor.size')
 def convert_size(ctx: ConversionContext):
     if ctx.has_implicit_batch():  # this mode has no dynamic shapes
@@ -20,19 +35,16 @@ def convert_size(ctx: ConversionContext):
             output._trt = ctx.get_dim_of_shape(trt_dyn_shape, trt_dim)
     else:  # Tensor.size(), get the full shape
         assert isinstance(output, torch.Size)
-        if -1 in input_trt.shape:
-            trt_dyn_shape = ctx.network.add_shape(input_trt).get_output(0)
-            new_output = []
-            # Detect static/dynamic dims and output either python_int/trt_scalar
-            for idx, input_dim, output_dim in zip(range(len(output)), input_trt.shape, output):
-                if input_dim == -1:  # make it a torch tensor and add ._trt attribute to it
-                    output_dim = torch.tensor(output_dim, dtype=torch.int32)
-                    output_dim._trt = ctx.get_dim_of_shape(trt_dyn_shape, idx)
-                    new_output.append(output_dim)
-                else:
-                    assert input_dim == output_dim
-                    new_output.append(input_dim)
-            output = tuple(new_output)
+        new_output_trt = get_tuple_of_shape(ctx, input_trt)
+        new_outputs = []
+        for output_dim, output_trt_dim in zip(output, new_output_trt):
+            if isinstance(output_trt_dim, trt.ITensor):
+                output_dim = torch.tensor(output_dim, dtype=torch.int32)
+                output_dim._trt = output_trt_dim
+            else:
+                assert output_dim == output_trt_dim
+            new_outputs.append(output_dim)
+        output = tuple(new_outputs)
 
     ctx.method_return = output  # Overwrite the output because we can't put _trt attribute on a python scalar
 

@@ -19,17 +19,31 @@ def insert_dim(ctx, trt_tensor, new_dim):
         return ctx.reshape_to(trt_tensor, new_shape)
 
 
+def remove_dim(ctx, trt_tensor, old_dims: list):
+    ndims = len(trt_tensor.shape)
+
+    perm1 = list(range(ndims))
+    for od in old_dims:
+        perm1.remove(od)
+    perm1.extend(old_dims)
+
+    layer = ctx.network.add_shuffle(trt_tensor)
+    layer.first_transpose = perm1
+    layer.reshape_dims = [0] * (ndims - len(old_dims))
+    return layer.get_output(0)
+
+
 @tensorrt_converter('torch.Tensor.reshape')
 @tensorrt_converter('torch.Tensor.view')
 def convert_view(ctx: ConversionContext):
-    input_trt = ctx.get_arg(None, pos=0, to_trt=True)
+    input_trt = ctx.get_arg("self", pos=0, to_trt=True)
     new_shape = ctx.method_args[1:]
 
     output = ctx.method_return
     output._trt = ctx.reshape_to(input_trt, new_shape)
 
 
-# @tensorrt_converter('torch.Tensor.squeeze')
+# Only accepts one dim
 @tensorrt_converter('torch.Tensor.unsqueeze')
 def convert_squeeze(ctx: ConversionContext):
     input_trt = ctx.get_arg("input", 0, to_trt=True)
@@ -38,6 +52,16 @@ def convert_squeeze(ctx: ConversionContext):
 
     output = ctx.method_return
     output._trt = insert_dim(ctx, input_trt, new_dim)
+
+
+@tensorrt_converter('torch.Tensor.squeeze')
+def convert_squeeze(ctx: ConversionContext):
+    input_trt = ctx.get_arg("input", 0, to_trt=True)
+    ndims = len(input_trt.shape)
+    old_dim = ctx.get_trt_dim(pos=1, ndims=ndims)
+
+    output = ctx.method_return
+    output._trt = remove_dim(ctx, input_trt, [old_dim])
 
 
 # @tensorrt_converter('torch.flatten')

@@ -1,58 +1,59 @@
 from ..conversion_context import *
 from torch2trt.module_test import add_module_test
+from .view import remove_dim
 
 
-def slice_to_trt(dim_size, dim_slice):
+def slice_to_trt(ctx, dim_size, dim_slice):
     start = 0 if dim_slice.start is None else dim_slice.start
     stop = dim_size if dim_slice.stop is None else dim_slice.stop
     stride = 1 if dim_slice.step is None else dim_slice.step
+    assert isinstance(stride, int), "dynamic stride not supported"
+    assert all(isinstance(s, (int, trt.ITensor)) for s in (start, stop, stride))
 
-    if isinstance(dim_size, trt.ITensor):
-        if start == 0 and stride == 1:
-            size = dim_size
+    if isinstance(stop, trt.ITensor):
+        assert stride == 1, "only stride=1 supported with dynamic slices"
+        if start == 0:
+            size_before_stride = stop
         else:
-            raise NotImplementedError("Only full slice (:) on dynamic axis supported")
+            size_before_stride = ctx.network.add_elementwise(
+                stop, ctx.get_trt_one(start), trt.ElementWiseOperation.SUB).get_output(0)
+        return start, size_before_stride, stride
+    elif isinstance(start, trt.ITensor):
+        assert stride == 1
+        size_before_stride = ctx.network.add_elementwise(
+            ctx.get_trt_one(stop), start, trt.ElementWiseOperation.SUB).get_output(0)
+        return start, size_before_stride, stride
     else:
+        assert all(isinstance(s, int) for s in (start, stop, stride))
         size = (stop - start - 1) // stride + 1
+        return start, size, stride
 
-    return start, size, stride
-
-
-def num_slice_types(slices):
-    num_slice = 0
-    for s in slices:
-        if isinstance(s, slice) or isinstance(s, int):
-            num_slice += 1
-    return num_slice
-
-
-# def list_to_itensor(ctx, lst):
-#     consts = ctx.network.add_constant([a if isinstance(a, int) else -1 for a in lst]).get_output(0)
-#     varias = ctx.network.add_constant([a if isinstance(a, int) else -1 for a in lst]).get_output(0)
-
-
-# def dynamify_slices(starts, sizes, strides):
-#     if not all(isinstance(x, int) for x in strides):
-#         pass
 
 # TODO gather for list
 # THIS DOES NOT ASSUME IMPLICIT BATCH DIM, UNLIKE EVERY OTHER CONVERTER
 @tensorrt_converter('torch.Tensor.__getitem__')
 def convert_tensor_getitem(ctx: ConversionContext):
-    input = ctx.method_args[0]
+    input_trt = ctx.get_trt_one(ctx.method_args[0])
     slices = ctx.method_args[1]
-    if isinstance(slices, int) or isinstance(slices, slice):
+    if isinstance(slices, (int, slice)):
         slices = (slices,)
+    if isinstance(slices, list):
+        raise NotImplementedError("List in getitem not supported")
     output = ctx.method_return
-
-    input_trt = ctx.get_trt_one(input)  # may or may not have a batch dim
-    is_const = len(input_trt.shape) == input.dim()  # Only constant tensors have the batch axis
+    ndims = len(input_trt.shape)
 
     # Step 1 - Replace ellipsis with expanded slices
 
-    num_ellipsis = input.ndim - num_slice_types(slices)
+    num_ellipsis = ndims - len(slices)  # num_slice_types(slices)
 
-    num_slices = 0
+    def to_trt_keeping_constant(t):
+        if isinstance(t, int) or t is None:
+            return t
+        elif isinstance(t, torch.Tensor):
+            return ctx.get_trt_one(t)
+        else:
+            raise ValueError
+
     new_slices = []
     for s in slices:
         if s == Ellipsis:
@@ -60,67 +61,64 @@ def convert_tensor_getitem(ctx: ConversionContext):
                 new_slices.append(slice(None, None, None))
                 num_ellipsis -= 1
         elif isinstance(s, slice):
+            new_slices.append(slice(*map(to_trt_keeping_constant, (s.start, s.stop, s.step))))
+        elif isinstance(s, int):  # Keep the ints for now so we can infer removed dims later on
             new_slices.append(s)
-            num_slices += 1
-        elif isinstance(s, int):
-            new_slices.append(s)
+        elif isinstance(s, torch.Tensor):
+            new_slices.append(ctx.get_trt_one(s))
         else:
             raise ValueError(f"unsupported type {type(s)} in __getitem__")
 
     # fill missing slices at end
-    while num_slice_types(new_slices) < len(input.shape):
+    while len(new_slices) < ndims:
         new_slices.append(slice(None, None, None))
     # print("new_slices:",new_slices)
     # print("input shape:", input.shape)
     # print("input_trt shape:", input_trt.shape)
-    assert len(new_slices) == input.dim()
 
-    # # Step 2 - Remove batch from slices (TRT from this point)
-    if not is_const:
-        if new_slices[0] != slice(None, None, None):
-            raise ValueError(f"can't slice on batch dimension")  # TODO actually I can in explicit mode
-        new_slices = new_slices[1:]
-        # print("new_slices shrink to:", new_slices)
-        assert len(new_slices) == len(input_trt.shape)
+    # # # Step 2 - Remove batch from slices (TRT from this point)
+    # if not is_const:
+    #     if new_slices[0] != slice(None, None, None):
+    #         raise ValueError(f"can't slice on batch dimension")  # TODO actually I can in explicit mode
+    #     new_slices = new_slices[1:]
+    #     # print("new_slices shrink to:", new_slices)
+    #     assert len(new_slices) == len(input_trt.shape)
 
     # Step 3 - Add slice layer
-    starts, sizes, strides = [], [], []
-    # input_trt_shape = ctx.network.add_shape(input_trt).get_output(0)
-    for i, (s, input_size) in enumerate(zip(new_slices, input_trt.shape)):
-        if input_size == -1:
-            raise NotImplementedError("sorry no dynamic sizes")
-            if s == slice(None, None, None):
-                # dynamic input size - only support full slices for now
-                input_size = ctx.network.add_slice(
-                    input_trt_shape, [i], [1], [1]).get_output(0)
 
+    if -1 in input_trt.shape:
+        input_trt_shape = ctx.network.add_shape(input_trt).get_output(0)
+    starts, sizes, strides = [], [], []
+    removed_axes = []
+    for i, s in enumerate(new_slices):
+        if input_trt.shape[i] == -1:  # dynamic size
+            input_shape_i = ctx.get_dim_of_shape(input_trt_shape, i)
+        else:  # static size for this dim
+            input_shape_i = input_trt.shape[i]
+            # raise NotImplementedError("sorry no dynamic sizes")
+            # if s == slice(None, None, None):
+            #     # dynamic input size - only support full slices for now
+            #     input_size = ctx.network.add_slice(
+            #         input_trt_shape, [i], [1], [1]).get_output(0)
         if isinstance(s, slice):
-            start, size, stride = slice_to_trt(input_size, s)
+            start, size, stride = slice_to_trt(ctx, input_shape_i, s)
             starts.append(start)
             sizes.append(size)
             strides.append(stride)
-        elif isinstance(s, int):
+        elif isinstance(s, (int, trt.ITensor)):
+            removed_axes.append(i)
             starts.append(s)
             sizes.append(1)
             strides.append(1)
         else:
             raise ValueError("Invalid slice")
-    # starts, sizes, strides = dynamify_slices(starts,sizes,strides)
 
     # print("starts,sizes,strides:", starts, sizes, strides)
-    assert len(starts) == len(sizes) == len(strides) == len(new_slices) == len(input_trt.shape)
+    assert len(starts) == len(sizes) == len(strides) == ndims
+    output_trt = ctx.slice_tensor(input_trt, starts, sizes, strides)
 
-    output_trt = ctx.network.add_slice(input_trt, starts, sizes, strides).get_output(0)
-    # print("shape after step3:", output_trt.shape)
-
-    # Step 4 - Add shuffle layer to insert dimensions for 'None' slices and remove dimensions for 'int' slices
-
-    # num_non_slice = len([s for s in new_slices if not isinstance(s, slice)])
-    # if tuple(output_trt.shape) != tuple(output.shape):
-    #     # print("reshape to:", output.shape)
-    #     output_trt = ctx.reshape_to(output_trt, output.shape)
-
-    output._trt = output_trt
+    # Step 4 - remove int axes
+    output._trt = remove_dim(ctx, output_trt, removed_axes)
 
 
 class LambdaModule(torch.nn.Module):

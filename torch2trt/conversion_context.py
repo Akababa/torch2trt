@@ -5,33 +5,36 @@ from .conversion_utils import *
 from typing import Union, Tuple, Dict, Optional
 
 CONVERTERS = {}
+_my_default = object()  # dummy default
 
 
 # put constants with batch dim?
 # TODO FIX this by comparing dim sizes of input and input._trt!
+# TODO refactor the network operations into a network subclass
 class ConversionContext(object):
-    __default = object()  # dummy default
-
+    # TODO implicit type conversion
     def get_trt_one(self, t: Union[torch.Tensor, float, int]) -> trt.ITensor:
+        if isinstance(t, trt.ITensor):
+            return t
         # GET TRT TENSOR (OR CREATE TRT CONSTANT)
         # get tensor w/ _trt
-        if isinstance(t, torch.Tensor) and hasattr(t, '_trt'):
+        elif isinstance(t, torch.Tensor) and hasattr(t, '_trt'):
             trt_tensor = t._trt
-        # elif isinstance(t, trt.ITensor):
-        #     trt_tensor = t
+            shape_ok(t)
         # or... add constant for leaf tensor w/o _trt
         elif isinstance(t, torch.Tensor) and not hasattr(t, '_trt'):
             # add leaf tensor - don't exclude batch when adding constants...?
             t._trt = self._add_const_trt(t)
             trt_tensor = t._trt
+            shape_ok(t)
         # or... create and add constant for scalar primitive (lost reference) TODO
-        elif isinstance(t, float) or isinstance(t, int):
+        elif isinstance(t, (float, int)):
             dtype = (torch.float32 if isinstance(t, float) else torch.int32)
             trt_tensor = self._add_const_trt(torch.tensor(t, dtype=dtype))
         else:
             raise ValueError(f'Bad tensor of type {type(t)}')
 
-        assert len(trt_tensor.shape) >= 0
+        assert trt_tensor.shape.__len__() >= 0
         return trt_tensor
 
     def convert_dtype_to(self, tensor: trt.ITensor, dtype: trt.DataType):
@@ -57,29 +60,7 @@ class ConversionContext(object):
         assert all(len(dims_set) <= 1 for dims_set in all_dims_set)
         return new_tensors
 
-    def get_trt_dim(self, name="dim", pos=1, default=__default, ndims=None):
-        # If ndims is none, we must have no negative dim indices.
-        # Gets the dim argument, possibly shifted for implicit batch dim.
-        # default is in terms of torch, and will get converted to trt!
-        dim = self.get_arg(name, pos, default=default)
-        dim = _fix_dim(dim, ndims)
-        return dim
-
-    def get_trt_axes(self, trt_dim, ndims):
-        # Returns an axes bitmask
-        if isinstance(trt_dim, int):
-            trt_dim = (trt_dim,)
-        trt_dim = _fix_dim(trt_dim, ndims)
-        # create axes bitmask for reduce layer
-        axes = 0
-        for d in trt_dim:
-            assert d >= 0
-            axes |= (1 << d)  # don't -1 because it's already trt dim
-
-        return axes
-
-    # If len(trt_tensor.shape) < broadcast_num_dim, prepends 1 dims to match number of dims in shape,
-    # otherwise returns trt_tensor
+    # If len(trt_tensor.shape) < broadcast_num_dim, prepends [1] dims to match number of dims in shape
     def make_broadcastable_to(self, trt_tensor: trt.ITensor, broadcast_num_dim: int):
         assert isinstance(trt_tensor, trt.ITensor)
         trt_num_dims = len(trt_tensor.shape)
@@ -97,12 +78,12 @@ class ConversionContext(object):
             assert new_shape.count(-1) <= 1
             layer.reshape_dims = new_shape
         else:  # I have a tensor
-            new_shape_tensor = self._make_shape_tensor(new_shape)
+            new_shape_tensor = self.make_shape_tensor(new_shape)
             layer.set_input(1, new_shape_tensor)
         return layer.get_output(0)
 
     # TODO use this everywhere
-    def _make_shape_tensor(self, shape):
+    def make_shape_tensor(self, shape):
         # Makes a 1d shape trt tensor
         trt_dims = [self.get_trt_one(t) for t in shape]
         trt_dims = [self.reshape_to(t, (1,)) for t in trt_dims]
@@ -110,12 +91,40 @@ class ConversionContext(object):
         layer.axis = 0
         return layer.get_output(0)
 
-    def get_arg(self, name, pos, default=__default, to_trt=False):
+    def slice_tensor(self, t: trt.ITensor, starts, sizes, strides):
+        assert isinstance(t, trt.ITensor) and len(starts) == len(sizes) == len(strides)
+        ndims = len(t.shape)
+        nb_inputs = 1
+        for i, ss in enumerate((starts, sizes, strides)):
+            if not all(isinstance(si, int) for si in ss):
+                nb_inputs = i + 1
+        # Create layer with possible dummy inputs to be overwritten
+        slice_layer = self.network.add_slice(t,
+                                             starts if nb_inputs < 1 else (0,) * ndims,
+                                             sizes if nb_inputs < 2 else (1,) * ndims,
+                                             strides if nb_inputs < 3 else (1,) * ndims)
+        if nb_inputs >= 3:
+            slice_layer.set_input(3, self.make_shape_tensor(strides))
+            assert slice_layer.stride.shape.__len__() >= 0
+        if nb_inputs >= 2:
+            slice_layer.set_input(2, self.make_shape_tensor(sizes))
+            assert slice_layer.size.shape.__len__() >= 0
+        if nb_inputs >= 1:
+            slice_layer.set_input(1, self.make_shape_tensor(starts))
+            assert slice_layer.start.shape.__len__() >= 0
+
+        return slice_layer.get_output(0)
+
+    def get_dim_of_shape(self, trt_shape: trt.ITensor, trt_dim: int) -> trt.ITensor:
+        trt_dyn_shape_dim = self.network.add_slice(trt_shape, (trt_dim,), (1,), (1,)).get_output(0)
+        return self.reshape_to(trt_dyn_shape_dim, ())
+
+    def get_arg(self, name, pos, default=_my_default, to_trt=False):
         if name in self.method_kwargs:
             val = self.method_kwargs[name]
         elif len(self.method_args) > pos:
             val = self.method_args[pos]
-        elif default is not ConversionContext.__default:
+        elif default is not _my_default:
             val = default
         else:
             raise ValueError(f"Missing arg {name} at pos {pos}")
@@ -123,9 +132,32 @@ class ConversionContext(object):
             val = self.get_trt_one(val)
         return val
 
-    def get_dim_of_shape(self, trt_shape: trt.ITensor, trt_dim: int) -> trt.ITensor:
-        trt_dyn_shape_dim = self.network.add_slice(trt_shape, (trt_dim,), (1,), (0,)).get_output(0)
-        return self.reshape_to(trt_dyn_shape_dim, ())
+    def get_trt_dim(self, name="dim", pos=1, default=_my_default, ndims=None) -> int:
+        # If ndims is none, we must have no negative dim indices.
+        dim = self.get_arg(name, pos, default=default)
+        dim = _fix_dim(dim, ndims)
+        return dim
+
+    def get_trt_axes(self, trt_dim, ndims):
+        # Returns an axes bitmask
+        if isinstance(trt_dim, int):
+            trt_dim = (trt_dim,)
+        trt_dim = _fix_dim(trt_dim, ndims)
+        # create axes bitmask for reduce layer
+        axes = 0
+        for d in trt_dim:
+            assert d >= 0
+            axes |= (1 << d)  # don't -1 because it's already trt dim
+
+        return axes
+
+    def _add_const_trt(self, tensor: torch.Tensor):
+        shape = tuple(tensor.shape)
+        array = tensor.detach().cpu().numpy()
+        if array.dtype == np.int64:  # TRT doesn't support long
+            # print(f"Warning: implicitly converting an array of shape {array.shape} from int64 to int32")
+            array = array.astype(np.int32)
+        return self.network.add_constant(shape, array).get_output(0)
 
     def add_inputs(self, torch_inputs, input_shapes=None, names=None):
         if names is None:
@@ -149,6 +181,8 @@ class ConversionContext(object):
                     dtype=torch_dtype_to_trt(torch_dtype),
                 )
                 trt_tensor.location = torch_device_to_trt(torch_input.device)
+                print(f"Added input {trt_tensor.name} of shape {trt_tensor.shape}"
+                      f" dtype {trt_tensor.dtype} device {trt_tensor.location}")
                 torch_input._trt = trt_tensor
 
     def mark_outputs(self, torch_outputs, names=None):
@@ -171,14 +205,6 @@ class ConversionContext(object):
     def nonbatch_dim(self):
         return 1 if self.has_implicit_batch() else 0
 
-    def _add_const_trt(self, tensor: torch.Tensor):
-        shape = tuple(tensor.shape)
-        array = tensor.detach().cpu().numpy()
-        if array.dtype == np.int64:  # TRT doesn't support long
-            # print(f"Warning: implicitly converting an array of shape {array.shape} from int64 to int32")
-            array = array.astype(np.int32)
-        return self.network.add_constant(shape, array).get_output(0)
-
     def setup_method(self, args, kwargs, outputs, method_str):
         self.method_args = args
         self.method_kwargs = kwargs
@@ -194,11 +220,13 @@ class ConversionContext(object):
         self._first_input = None
 
     def __enter__(self):
+        wrap_get_output()
         for hook in self.hooks:
             hook.__enter__()
         return self
 
     def __exit__(self, type, val, tb):
+        unwrap_get_output()
         for hook in self.hooks:
             hook.__exit__(type, val, tb)
 
@@ -245,6 +273,7 @@ class ConversionHook(object):
 
 def shape_ok(t: torch.Tensor):
     assert isinstance(t, torch.Tensor)
+    assert t._trt.shape.__len__() >= 0, "Bad trt ITensor output"
     assert all(torch_d == trt_d or trt_d == -1 for torch_d, trt_d in
                zip(t.shape, t._trt.shape))
 
@@ -267,7 +296,7 @@ def _fix_dim(dim, ndims: Optional[int]):
     if isinstance(dim, int):
         return helper(dim)
     else:
-        assert isinstance(dim, list) or isinstance(dim, tuple)
+        assert isinstance(dim, (list, tuple))
         return tuple(helper(d) for d in dim)
 
 
@@ -294,7 +323,7 @@ def _attach_converter(ctx: ConversionContext, method, converter, method_str):
                 def stringer(t):
                     if isinstance(t, torch.Tensor):
                         return f"Tensor({tuple(t.shape)})"
-                    elif isinstance(t, list) or isinstance(t, tuple):
+                    elif isinstance(t, (list, tuple)):
                         return f"{type(t).__name__}[{stringer(t[0]) if len(t) > 0 else 'EMPTY'}]"
                     else:
                         return type(t).__name__
@@ -315,7 +344,7 @@ def _attach_converter(ctx: ConversionContext, method, converter, method_str):
             if converter['is_real']:
                 def _check_shape_recursive(outputs_recurse, pos=()):
                     # Checks for corrupted converter trt tensor outputs, since python api/abi doesn't do so
-                    if isinstance(outputs_recurse, int) or isinstance(outputs_recurse, float):
+                    if isinstance(outputs_recurse, (int, float)):
                         expected = outputs_orig
                         for p in pos:
                             expected = expected[p]
@@ -326,7 +355,6 @@ def _attach_converter(ctx: ConversionContext, method, converter, method_str):
                     if isinstance(outputs_recurse, torch.Tensor):
                         if hasattr(outputs_recurse, "_trt"):
                             try:
-                                len(outputs_recurse._trt.shape)  # This will crash python without exception handling
                                 shape_ok(outputs_recurse)
                                 print(
                                     f"Output shape     {tuple(outputs_recurse._trt.shape)}, {outputs_recurse._trt.dtype}\n"
