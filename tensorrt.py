@@ -112,6 +112,12 @@ class ILayer:
         except:
             pass
         try:
+            shape = self.inputs[1].shape
+            self.torch_value = self.inputs[1].torch_value
+            return shape
+        except:
+            pass
+        try:
             shape = self.inputs[0][0].shape
             self.torch_value = self.inputs[0][0].torch_value
             return shape
@@ -135,7 +141,7 @@ class ILayer:
             return shape
         except:
             pass
-        print("YOLO shape failed")
+        # print("YOLO shape failed")
         return None
 
     def set_output_type(self, idx, dtype):
@@ -287,7 +293,7 @@ class Weights:
 
 
 TensorLocation = Enum("TensorLocation", "DEVICE HOST")
-BuilderFlags = Enum("BuilderFlags", "GPU_FALLBACK REFIT DEBUG STRICT_TYPES INT8 FP16")
+BuilderFlag = Enum("BuilderFlag", "GPU_FALLBACK REFIT DEBUG STRICT_TYPES INT8 FP16")
 DeviceType = Enum("DeviceType", "GPU DLA")
 ElementWiseOperation = Enum("ElementWiseOperation", "SUM SUB DIV MIN MAX POW MUL PROD")
 ActivationType = Enum("ActivationType", "TANH RELU")

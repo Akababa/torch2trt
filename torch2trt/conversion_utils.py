@@ -18,7 +18,7 @@ def __get_output_v2(*args, **kwargs):
 
 def wrap_get_output():
     trt.ILayer.get_output = __get_output_v2
-    print(f"Wrapped {get_output_old} - This should only be called once")
+    # print(f"Wrapped {get_output_old} - This should only be called once")
 
 
 def unwrap_get_output():

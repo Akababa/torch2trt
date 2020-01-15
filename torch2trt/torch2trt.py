@@ -47,11 +47,11 @@ def torch2trt(module,
     # Set config properties
     config.max_workspace_size = max_workspace_size
     if fp16_mode:
-        config.set_flag(trt.BuilderFlags.FP16)
+        config.set_flag(trt.BuilderFlag.FP16)
     if debug_sync:
-        config.set_flag(trt.BuilderFlags.DEBUG)
+        config.set_flag(trt.BuilderFlag.DEBUG)
     if strict_type_constraints:
-        config.set_flag(trt.BuilderFlags.STRICT_TYPES)
+        config.set_flag(trt.BuilderFlag.STRICT_TYPES)
     if use_DLA:
         config.default_device_type = trt.DeviceType.DLA
 
@@ -59,7 +59,7 @@ def torch2trt(module,
         # default to use input tensors for calibration
         if int8_calib_dataset is None:
             int8_calib_dataset = TensorBatchDataset(inputs_in)
-        config.set_flag(trt.BuilderFlags.INT8)
+        config.set_flag(trt.BuilderFlag.INT8)
         # @TODO(jwelsh):  Should we set batch_size=max_batch_size?  Need to investigate memory consumption
         config.int8_calibrator = DatasetCalibrator(inputs, int8_calib_dataset, batch_size=1,
                                                    algorithm=int8_calib_algorithm)
@@ -70,21 +70,23 @@ def torch2trt(module,
 
     network = builder.create_network(flags=build_flags)
 
-    with ConversionContext(network) as ctx:
-        if isinstance(inputs, list):
-            inputs = tuple(inputs)
-        if not isinstance(inputs, tuple):
-            inputs = (inputs,)
-        ctx.add_inputs(inputs, input_shapes=input_shapes, names=input_names)
+    ctx = ConversionContext(network)
+    if isinstance(inputs, list):
+        inputs = tuple(inputs)
+    if not isinstance(inputs, tuple):
+        inputs = (inputs,)
 
+    ctx.add_inputs(inputs, input_shapes=input_shapes, names=input_names)
+
+    with ctx:
         if input_names is None:
             outputs = module(*inputs)
         else:
             outputs = module(**{name: value for name, value in zip(input_names, inputs)})
 
-        if not isinstance(outputs, (tuple, list)):
-            outputs = (outputs,)
-        ctx.mark_outputs(outputs, output_names)
+    if not isinstance(outputs, (tuple, list)):
+        outputs = (outputs,)
+    ctx.mark_outputs(outputs, output_names)
 
     # Build engine from network and config
     engine = builder.build_engine(network, config)

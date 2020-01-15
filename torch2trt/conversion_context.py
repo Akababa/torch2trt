@@ -73,8 +73,8 @@ class ConversionContext(object):
         return trt_tensor
 
     def reshape_to(self, trt_tensor: trt.ITensor, new_shape):
-        if hasattr(trt_tensor, "_up1") and new_shape == (1,):
-            return trt_tensor._up1
+        if new_shape == (1,) and id(trt_tensor) in self._up1:
+            return self._up1[id(trt_tensor)]
         layer = self.network.add_shuffle(trt_tensor)
         if all(isinstance(d, int) for d in new_shape):
             assert new_shape.count(-1) <= 1
@@ -84,7 +84,7 @@ class ConversionContext(object):
             layer.set_input(1, new_shape_tensor)
         trt_out = layer.get_output(0)
         if new_shape == ():
-            trt_out._up1 = trt_tensor
+            self._up1[id(trt_out)] = trt_tensor
         return trt_out
 
     # TODO use this everywhere
@@ -189,7 +189,9 @@ class ConversionContext(object):
                 print(f"Added input {trt_tensor.name} of shape {trt_tensor.shape}"
                       f" dtype {trt_tensor.dtype} device {trt_tensor.location}")
                 torch_input._trt = trt_tensor
-                trt_tensor.torch_value = torch_input
+                # THIS BREAK EVERYTHING
+                if hasattr(trt_tensor, "torch_value"):  # For mocking
+                    trt_tensor.torch_value = torch_input
 
     def mark_outputs(self, torch_outputs, names=None):
         if names is None:
@@ -226,12 +228,14 @@ class ConversionContext(object):
         self._first_input = None
 
     def __enter__(self):
+        print("Entering conversion context")
         wrap_get_output()
         for hook in self.hooks:
             hook.__enter__()
         return self
 
     def __exit__(self, type, val, tb):
+        print("Exiting conversion context")
         unwrap_get_output()
         for hook in self.hooks:
             hook.__exit__(type, val, tb)
@@ -244,12 +248,13 @@ class ConversionContext(object):
         self.method_return = None
         self.method_str = None
         self._first_input = None
+        self._up1 = dict()  # for fewer unnecessary reshapes
         # We keep a dict so we can track ints for dynamic size
         # self._trt = dict()  # type: Dict[int, trt.ITensor]
-        self.hooks = [
-            ConversionHook(self, method, converter)
-            for method, converter in converters.items()
-        ]
+        self.hooks = []
+        for method, converter in converters.items():
+            # assert self.lock == False
+            self.hooks.append(ConversionHook(self, method, converter))
 
 
 class ConversionHook(object):
@@ -261,7 +266,7 @@ class ConversionHook(object):
         self.converter = converter
 
     def _set_method(self, method):
-        exec('%s = method' % self.method_str)
+        exec('%s = method' % self.method_str, {"torch": torch, "method": method})  ## WTF??
 
     def __enter__(self):
         try:
@@ -311,12 +316,13 @@ def _attach_converter(ctx: ConversionContext, method, converter, method_str):
     global DUMMY_CONVERTERS
 
     def wrapper(*args, **kwargs):
-        # If inside another (parent) converter, return original
-        if ctx.lock:
+        # If inside another (parent) converter, or in debugger, return original
+        if ctx.lock:  # or sys.gettrace() is not None:
             return method(*args, **kwargs)
 
         if converter['is_real']:
-            ctx.lock = True  # only real converters can acquire lock
+            # with ctx.lock:
+            ctx.lock = True  # method_str  # only real converters can acquire lock
 
         # run original method
         outputs_orig = method(*args, **kwargs)
@@ -377,10 +383,10 @@ def _attach_converter(ctx: ConversionContext, method, converter, method_str):
 
             _check_shape_recursive(ctx.method_return)
 
-        print()
+            print()
+            ctx.lock = False
         # convert to None so conversion will fail for unsupported layers
         ctx.cleanup_method()
-        ctx.lock = False
 
         return outputs
 

@@ -227,20 +227,17 @@ class GPT2Model(GPT2PreTrainedModel):
     def set_input_embeddings(self, new_embeddings):
         self.wte = new_embeddings
 
-    def forward(self, input_ids: torch.Tensor, **kwargs):
+    def forward(self, input_ids: torch.Tensor, past: torch.Tensor):
         if input_ids is None:
             raise ValueError("You have to specify either input_ids or inputs_embeds")
 
-        past = []
-        for layer_idx in range(self.config.n_layer):
-            past.append([kwargs[f"past_{layer_idx}_k"], kwargs[f"past_{layer_idx}_v"]])
-        # input_ids = input_ids.to(self.device)
+        # input_ids = input_ids.to(self.device) # do this before
         # past = past.to(self.device)
         batch_size, input_len = input_ids.size()
-        past_length = past[0][0].size(-2)  # TODO make this dynamic
+        past = past.permute((2, 1, 0, 3, 4, 5))
+        past_length = past.size(-2)
 
         position_embeds = self.wpe.weight.data[past_length:past_length + input_len].unsqueeze(0)  # put in the batch
-        # print(position_embeds.device)
 
         inputs_embeds = self.wte(input_ids)
         hidden_states = inputs_embeds + position_embeds
