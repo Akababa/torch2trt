@@ -240,9 +240,9 @@ class GPT2Model(GPT2PreTrainedModel):
         past_length = past[0][0].size(-2)  # TODO make this dynamic
 
         position_embeds = self.wpe.weight.data[past_length:past_length + input_len].unsqueeze(0)  # put in the batch
-        print(position_embeds.device)
+        # print(position_embeds.device)
 
-        inputs_embeds = self.wte(input_ids.to(torch.long))
+        inputs_embeds = self.wte(input_ids)
         hidden_states = inputs_embeds + position_embeds
         hidden_states = self.drop(hidden_states)  # dropout
 

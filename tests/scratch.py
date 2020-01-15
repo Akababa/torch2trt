@@ -58,4 +58,4 @@ with torch.no_grad():
                                     optimization_profile=opt_profile,
                                     # build_flags=flags,
                                     fp16_mode=True,
-                                    max_workspace_size=2**20)
+                                    max_workspace_size=24 << 30)
