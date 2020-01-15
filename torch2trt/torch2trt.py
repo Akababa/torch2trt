@@ -11,7 +11,7 @@ def torch2trt(module,
               input_names=None,
               optimization_profile=None,  # Required for dynamic
               output_names=None,
-              log_level=trt.Logger.ERROR,
+              log_level=trt.Logger.VERBOSE,
               max_batch_size=1,
               fp16_mode=False,
               max_workspace_size=0,
@@ -25,6 +25,7 @@ def torch2trt(module,
     inputs_in = inputs
     logger = trt.Logger(log_level)
     builder = trt.Builder(logger)
+    builder.debug_sync = True
 
     # Infer input shapes (dynamic) and make optimization profile
     input_shapes = [list(inp.shape) for inp in inputs]

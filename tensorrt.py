@@ -29,7 +29,7 @@ class ILayer:
             if i == 1:
                 self.start = inp
             if i == 2:
-                self.size = inp
+                self.shape = inp
             if i == 3:
                 self.stride = inp
 
@@ -202,6 +202,10 @@ class ITensor:
 
     def __iter__(self):
         return self.torch_value.__iter__()
+
+    def __len__(self):
+        assert len(self.shape) == 1
+        return len(self.torch_value)
 
 
 class IBuilderConfig:

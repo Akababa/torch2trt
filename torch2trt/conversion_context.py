@@ -105,13 +105,13 @@ class ConversionContext(object):
                                              strides if nb_inputs < 3 else (1,) * ndims)
         if nb_inputs >= 3:
             slice_layer.set_input(3, self.make_shape_tensor(strides))
-            assert slice_layer.stride.shape.__len__() >= 0
+            assert slice_layer.stride.__len__() >= 0, "Invalid stride argument"
         if nb_inputs >= 2:
             slice_layer.set_input(2, self.make_shape_tensor(sizes))
-            assert slice_layer.size.shape.__len__() >= 0
+            assert slice_layer.shape.__len__() >= 0
         if nb_inputs >= 1:
             slice_layer.set_input(1, self.make_shape_tensor(starts))
-            assert slice_layer.start.shape.__len__() >= 0
+            assert slice_layer.start.__len__() >= 0
 
         return slice_layer.get_output(0)
 
@@ -196,7 +196,7 @@ class ConversionContext(object):
             trt_tensor.location = torch_device_to_trt(torch_output.device)
             trt_tensor.dtype = torch_dtype_to_trt(torch_output.dtype)
             print(f"Found output {trt_tensor.name} with shape {trt_tensor.shape}, dtype {trt_tensor.dtype}")
-            self.network.mark_output(trt_tensor)
+            assert self.network.mark_output(trt_tensor)
 
     def has_implicit_batch(self) -> bool:
         return self.network.has_implicit_batch_dimension

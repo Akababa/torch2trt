@@ -116,7 +116,7 @@ class TRTModule(torch.nn.Module):
                 # name = self.engine.get_binding_name(idx)
                 dtype = torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
                 device = torch_device_from_trt(self.engine.get_location(idx))
-                shape = self.context.get_shape(idx)  # Infer output shape using TRT
+                shape = self.context.get_binding_shape(idx)  # Infer output shape using TRT
                 bindings[idx] = torch.empty(size=shape, dtype=dtype, device=device)
 
         return bindings
