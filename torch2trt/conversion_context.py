@@ -305,77 +305,76 @@ def _attach_converter(ctx: ConversionContext, method, converter, method_str):
     global DUMMY_CONVERTERS
 
     def wrapper(*args, **kwargs):
-        skip = True
+        # If inside another (parent) converter, return original
+        if ctx.lock:
+            return method(*args, **kwargs)
 
-        # check if another (parent) converter has lock
-        if not ctx.lock:
-            if converter['is_real']:
-                ctx.lock = True  # only real converters can acquire lock
-            skip = False
+        if converter['is_real']:
+            ctx.lock = True  # only real converters can acquire lock
 
         # run original method
         outputs_orig = method(*args, **kwargs)
         outputs = outputs_orig
 
-        if not skip:
-            ctx.setup_method(args, kwargs, outputs, method_str)
-            if converter["is_real"]:
-                def stringer(t):
-                    if isinstance(t, torch.Tensor):
-                        return f"Tensor({tuple(t.shape)})"
-                    elif isinstance(t, (list, tuple)):
-                        return f"{type(t).__name__}[{stringer(t[0]) if len(t) > 0 else 'EMPTY'}]"
+        # then run converter
+        ctx.setup_method(args, kwargs, outputs, method_str)
+        if converter["is_real"]:
+            def stringer(t):
+                if isinstance(t, torch.Tensor):
+                    return f"Tensor({tuple(t.shape)})"
+                elif isinstance(t, (list, tuple)):
+                    return f"{type(t).__name__}[{stringer(t[0]) if len(t) > 0 else 'EMPTY'}]"
+                else:
+                    return type(t).__name__
+
+            print("Converting {0}({1})".format(
+                method_str,
+                ", ".join(list(map(stringer, args)) +
+                          list(f"{k}={stringer(v)}" for k, v in kwargs.items()))
+            ))
+
+        converter['converter'](ctx)
+
+        if not (outputs is ctx.method_return):
+            print(f"wrapper overwrote output!")
+            assert converter["is_real"]
+            outputs = ctx.method_return
+
+        if converter['is_real']:
+            def _check_shape_recursive(outputs_recurse, pos=()):
+                # Checks for corrupted converter trt tensor outputs, since python api/abi doesn't do so
+                if isinstance(outputs_recurse, (int, float)):
+                    expected = outputs_orig
+                    for p in pos:
+                        expected = expected[p]
+                    assert outputs_recurse == expected
+                    print(f"Output const {outputs_recurse}, {type(outputs_recurse).__name__}\n"
+                          f"matched expected")
+                    return
+                if isinstance(outputs_recurse, torch.Tensor):
+                    if hasattr(outputs_recurse, "_trt"):
+                        try:
+                            shape_ok(outputs_recurse)
+                            print(
+                                f"Output shape     {tuple(outputs_recurse._trt.shape)}, {outputs_recurse._trt.dtype}\n"
+                                f"matched expected {tuple(outputs_recurse.shape)}, {outputs_recurse.dtype}")
+                        except Exception as e:
+                            print(f"Error: wrong shape on output {pos} of {method_str}:\n"
+                                  f"expected:{tuple(outputs_recurse.shape)}\n"
+                                  f"actual:  {tuple(outputs_recurse._trt.shape)}")
+                            raise e
                     else:
-                        return type(t).__name__
+                        print(f"Warning: output {pos} of {method_str} not supported")
+                    return
+                for i, output_i in enumerate(outputs_recurse):
+                    _check_shape_recursive(output_i, pos + (i,))
 
-                print("Converting {0}({1})".format(
-                    method_str,
-                    ", ".join(list(map(stringer, args)) +
-                              list(f"{k}={stringer(v)}" for k, v in kwargs.items()))
-                ))
+            _check_shape_recursive(ctx.method_return)
 
-            converter['converter'](ctx)
-
-            if not (outputs is ctx.method_return):
-                print(f"wrapper overwrote output!")
-                assert converter["is_real"]
-                outputs = ctx.method_return
-
-            if converter['is_real']:
-                def _check_shape_recursive(outputs_recurse, pos=()):
-                    # Checks for corrupted converter trt tensor outputs, since python api/abi doesn't do so
-                    if isinstance(outputs_recurse, (int, float)):
-                        expected = outputs_orig
-                        for p in pos:
-                            expected = expected[p]
-                        assert outputs_recurse == expected
-                        print(f"Output const {outputs_recurse}, {type(outputs_recurse).__name__}\n"
-                              f"matched expected")
-                        return
-                    if isinstance(outputs_recurse, torch.Tensor):
-                        if hasattr(outputs_recurse, "_trt"):
-                            try:
-                                shape_ok(outputs_recurse)
-                                print(
-                                    f"Output shape     {tuple(outputs_recurse._trt.shape)}, {outputs_recurse._trt.dtype}\n"
-                                    f"matched expected {tuple(outputs_recurse.shape)}, {outputs_recurse.dtype}")
-                            except Exception as e:
-                                print(f"Error: wrong shape on output {pos} of {method_str}:\n"
-                                      f"expected:{tuple(outputs_recurse.shape)}\n"
-                                      f"actual:  {tuple(outputs_recurse._trt.shape)}")
-                                raise e
-                        else:
-                            print(f"Warning: output {pos} of {method_str} not supported")
-                        return
-                    for i, output_i in enumerate(outputs_recurse):
-                        _check_shape_recursive(output_i, pos + (i,))
-
-                _check_shape_recursive(ctx.method_return)
-
-            print()
-            # convert to None so conversion will fail for unsupported layers
-            ctx.cleanup_method()
-            ctx.lock = False
+        print()
+        # convert to None so conversion will fail for unsupported layers
+        ctx.cleanup_method()
+        ctx.lock = False
 
         return outputs
 
