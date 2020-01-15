@@ -209,6 +209,8 @@ class ITensor:
 
 
 class IBuilderConfig:
+    def set_flag(self, flag):
+        pass
     def add_optimization_profile(self, prof):
         pass
 
@@ -239,9 +241,11 @@ class IOptimizationProfile:
     def set_shape(self, name, min, opt, max):
         pass
 
+
 class ICudaEngine:
     def __init__(self):
         self.num_bindings = 0
+
 
 class Logger:
     ERROR = 1
@@ -269,11 +273,6 @@ class CalibrationAlgoType:
     ENTROPY_CALIBRATION_2 = 2
 
 
-class TensorLocation:
-    DEVICE = 0
-    HOST = 1
-
-
 DataType = Enum("DataType", "FLOAT HALF INT8 INT32 BOOL")
 
 
@@ -287,6 +286,9 @@ class Weights:
             self.a = type_or_a
 
 
+TensorLocation = Enum("TensorLocation", "DEVICE HOST")
+BuilderFlags = Enum("BuilderFlags", "GPU_FALLBACK REFIT DEBUG STRICT_TYPES INT8 FP16")
+DeviceType = Enum("DeviceType", "GPU DLA")
 ElementWiseOperation = Enum("ElementWiseOperation", "SUM SUB DIV MIN MAX POW MUL PROD")
 ActivationType = Enum("ActivationType", "TANH RELU")
 float32, float16, int8, int32, _ = DataType

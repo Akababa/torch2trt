@@ -28,7 +28,7 @@ input_names = ["input_ids"]
 # [batch, sequence]
 # input_shapes = [(-1, -1)]
 input_dummy_shape = (ex_batch_size, input_dummy_seq_length)
-inputs = [torch.zeros(input_dummy_shape, dtype=torch.int32)]
+inputs = [torch.zeros(input_dummy_shape, dtype=torch.int64)]
 
 opt_profile = [None]
 opt_profile[0] = np.array([input_dummy_shape] * 3)
@@ -58,4 +58,5 @@ with torch.no_grad():
                                     optimization_profile=opt_profile,
                                     # build_flags=flags,
                                     fp16_mode=True,
-                                    max_workspace_size=24 << 30)
+                                    max_workspace_size=24 << 30,
+                                    use_DLA=True)

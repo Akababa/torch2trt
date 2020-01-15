@@ -60,31 +60,6 @@ class TRTModule(torch.nn.Module):
         outputs = [bindings[self.engine.get_binding_index(oname)] for oname in self.output_names]
         return outputs[0] if len(outputs) == 1 else tuple(outputs)
 
-        # bindings = [None] * (len(self.input_names) + len(self.output_names))
-        #
-        # # create output tensors
-        # outputs = []
-        # for i, output_name in enumerate(self.output_names):
-        #     idx = self.engine.get_binding_index(output_name)
-        #     dtype = torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
-        #     shape = tuple(self.engine.get_binding_shape(idx))
-        #     device = torch_device_from_trt(self.engine.get_location(idx))
-        #     output = torch.empty(size=shape, dtype=dtype, device=device)
-        #     outputs.append(output)
-        #     bindings[idx] = output.data_ptr()
-        #
-        # for i, input_name in enumerate(self.input_names):
-        #     idx = self.engine.get_binding_index(input_name)
-        #     bindings[idx] = inputs[i].data_ptr()
-        #
-        # self.context.execute_async_v2(bindings, torch.cuda.current_stream().cuda_stream)
-        #
-        # outputs = tuple(outputs)
-        # if len(outputs) == 1:
-        #     outputs = outputs[0]
-        #
-        # return outputs
-
     def get_bindings(self, input_dict) -> List[Optional[torch.Tensor]]:
         bindings = [None] * self.engine.num_bindings
         # Step 1: shape inputs

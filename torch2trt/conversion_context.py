@@ -73,6 +73,8 @@ class ConversionContext(object):
         return trt_tensor
 
     def reshape_to(self, trt_tensor: trt.ITensor, new_shape):
+        if hasattr(trt_tensor, "_up1") and new_shape == (1,):
+            return trt_tensor._up1
         layer = self.network.add_shuffle(trt_tensor)
         if all(isinstance(d, int) for d in new_shape):
             assert new_shape.count(-1) <= 1
@@ -80,7 +82,10 @@ class ConversionContext(object):
         else:  # I have a tensor
             new_shape_tensor = self.make_shape_tensor(new_shape)
             layer.set_input(1, new_shape_tensor)
-        return layer.get_output(0)
+        trt_out = layer.get_output(0)
+        if new_shape == ():
+            trt_out._up1 = trt_tensor
+        return trt_out
 
     # TODO use this everywhere
     def make_shape_tensor(self, shape):
@@ -184,15 +189,16 @@ class ConversionContext(object):
                 print(f"Added input {trt_tensor.name} of shape {trt_tensor.shape}"
                       f" dtype {trt_tensor.dtype} device {trt_tensor.location}")
                 torch_input._trt = trt_tensor
+                trt_tensor.torch_value = torch_input
 
     def mark_outputs(self, torch_outputs, names=None):
         if names is None:
             names = ['output_%d' % i for i in range(len(torch_outputs))]
         self.output_names = names
 
-        for i, torch_output in enumerate(torch_outputs):
+        for oname, torch_output in zip(self.output_names, torch_outputs):
             trt_tensor = torch_output._trt
-            trt_tensor.name = names[i]
+            trt_tensor.name = oname
             trt_tensor.location = torch_device_to_trt(torch_output.device)
             trt_tensor.dtype = torch_dtype_to_trt(torch_output.dtype)
             print(f"Found output {trt_tensor.name} with shape {trt_tensor.shape}, dtype {trt_tensor.dtype}")

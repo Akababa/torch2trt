@@ -9,7 +9,7 @@ from .conversion_context import ConversionContext
 def torch2trt(module,
               inputs,
               input_names=None,
-              optimization_profile=None,  # Required for dynamic
+              optimization_profile=None,  # Required for dynamic input shapes
               output_names=None,
               log_level=trt.Logger.WARNING,
               max_batch_size=1,
@@ -21,13 +21,14 @@ def torch2trt(module,
               int8_calib_dataset=None,
               int8_calib_algorithm=DEFAULT_CALIBRATION_ALGORITHM,
               build_flags=(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)),
-              debug_sync=False
+              debug_sync=False,
+              use_DLA=False,
               ):
     inputs_in = inputs
     logger = trt.Logger(log_level)
     builder = trt.Builder(logger)
-    builder.debug_sync = debug_sync
 
+    # Make builderconfig
     # Infer input shapes (dynamic) and make optimization profile
     input_shapes = [list(inp.shape) for inp in inputs]
     config = builder.create_builder_config()
@@ -42,6 +43,30 @@ def torch2trt(module,
                 if mind != maxd:
                     inp_shape[d] = -1
         config.add_optimization_profile(profile)
+
+    # Set config properties
+    config.max_workspace_size = max_workspace_size
+    if fp16_mode:
+        config.set_flag(trt.BuilderFlags.FP16)
+    if debug_sync:
+        config.set_flag(trt.BuilderFlags.DEBUG)
+    if strict_type_constraints:
+        config.set_flag(trt.BuilderFlags.STRICT_TYPES)
+    if use_DLA:
+        config.default_device_type = trt.DeviceType.DLA
+
+    if int8_mode:
+        # default to use input tensors for calibration
+        if int8_calib_dataset is None:
+            int8_calib_dataset = TensorBatchDataset(inputs_in)
+        config.set_flag(trt.BuilderFlags.INT8)
+        # @TODO(jwelsh):  Should we set batch_size=max_batch_size?  Need to investigate memory consumption
+        config.int8_calibrator = DatasetCalibrator(inputs, int8_calib_dataset, batch_size=1,
+                                                   algorithm=int8_calib_algorithm)
+
+    builder.max_batch_size = max_batch_size
+
+    # Build network
 
     network = builder.create_network(flags=build_flags)
 
@@ -61,20 +86,7 @@ def torch2trt(module,
             outputs = (outputs,)
         ctx.mark_outputs(outputs, output_names)
 
-    builder.max_workspace_size = max_workspace_size
-    builder.fp16_mode = fp16_mode
-    builder.max_batch_size = max_batch_size
-    builder.strict_type_constraints = strict_type_constraints
-
-    if int8_mode:
-        # default to use input tensors for calibration
-        if int8_calib_dataset is None:
-            int8_calib_dataset = TensorBatchDataset(inputs_in)
-        builder.int8_mode = True
-        # @TODO(jwelsh):  Should we set batch_size=max_batch_size?  Need to investigate memory consumption
-        builder.int8_calibrator = DatasetCalibrator(inputs, int8_calib_dataset, batch_size=1,
-                                                    algorithm=int8_calib_algorithm)
-
+    # Build engine from network and config
     engine = builder.build_engine(network, config)
     assert engine is not None, "build_cuda_network failed"
 

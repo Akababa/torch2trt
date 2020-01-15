@@ -39,7 +39,7 @@ def convert_size(ctx: ConversionContext):
         new_outputs = []
         for output_dim, output_trt_dim in zip(output, new_output_trt):
             if isinstance(output_trt_dim, trt.ITensor):
-                output_dim = torch.tensor(output_dim, dtype=torch.int32) # TODO device
+                output_dim = torch.tensor(output_dim, dtype=torch.int32)  # TODO device
                 output_dim._trt = output_trt_dim
             else:
                 assert output_dim == output_trt_dim
