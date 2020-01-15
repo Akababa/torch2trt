@@ -11,7 +11,7 @@ def torch2trt(module,
               input_names=None,
               optimization_profile=None,  # Required for dynamic
               output_names=None,
-              log_level=trt.Logger.VERBOSE,
+              log_level=trt.Logger.WARNING,
               max_batch_size=1,
               fp16_mode=False,
               max_workspace_size=0,
@@ -21,11 +21,12 @@ def torch2trt(module,
               int8_calib_dataset=None,
               int8_calib_algorithm=DEFAULT_CALIBRATION_ALGORITHM,
               build_flags=(1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)),
+              debug_sync=False
               ):
     inputs_in = inputs
     logger = trt.Logger(log_level)
     builder = trt.Builder(logger)
-    builder.debug_sync = True
+    builder.debug_sync = debug_sync
 
     # Infer input shapes (dynamic) and make optimization profile
     input_shapes = [list(inp.shape) for inp in inputs]
@@ -77,7 +78,7 @@ def torch2trt(module,
     engine = builder.build_engine(network, config)
     assert engine is not None, "build_cuda_network failed"
 
-    module_trt = TRTModule(engine, ctx.input_names, ctx.output_names)
+    module_trt = TRTModule(engine, ctx.input_names, ctx.output_names, debug_sync)
 
     if keep_network:
         module_trt.network = network

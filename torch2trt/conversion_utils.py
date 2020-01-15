@@ -58,6 +58,7 @@ def torch_device_to_trt(device):
     if device.type == torch.device('cuda').type:
         return trt.TensorLocation.DEVICE
     elif device.type == torch.device('cpu').type:
+        print("WARNING: on cpu, use model.to(device='cuda') before calling torch2trt")
         return trt.TensorLocation.HOST
     else:
         return TypeError('%s is not supported by tensorrt' % device)

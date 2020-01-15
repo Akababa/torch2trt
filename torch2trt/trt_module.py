@@ -22,13 +22,13 @@ def trt_num_outputs(engine):
 
 
 class TRTModule(torch.nn.Module):
-    def __init__(self, engine=None, input_names=None, output_names=None):
+    def __init__(self, engine: trt.ICudaEngine = None, input_names=None, output_names=None, debug_sync=False):
         super(TRTModule, self).__init__()
         self._register_state_dict_hook(TRTModule._on_state_dict)
         self.engine = engine
         if self.engine is not None:
             self.context = self.engine.create_execution_context()
-            self.context.debug_sync = True
+            self.context.debug_sync = debug_sync
 
         # these must be in order
         self.input_names = input_names
@@ -88,7 +88,7 @@ class TRTModule(torch.nn.Module):
     def get_bindings(self, input_dict) -> List[Optional[torch.Tensor]]:
         bindings = [None] * self.engine.num_bindings
         # Step 1: shape inputs
-        for idx in range(len(self.engine.num_bindings)):
+        for idx in range(self.engine.num_bindings):
             if self.engine.binding.is_input(idx) and \
                     self.engine.binding.is_shape_binding(idx):
                 name = self.engine.get_binding_name(idx)
@@ -98,7 +98,7 @@ class TRTModule(torch.nn.Module):
         assert self.context.all_shape_inputs_specified
 
         # Step 2: execution bindings (including shape bindings for dynamic inputs)
-        for idx in range(len(self.engine.num_bindings)):
+        for idx in range(self.engine.num_bindings):
             if self.engine.binding.is_input(idx):
                 name = self.engine.get_binding_name(idx)
                 if -1 in self.engine.get_binding_shape(idx):  # ?? not sure if this is right
@@ -110,7 +110,7 @@ class TRTModule(torch.nn.Module):
         assert self.context.all_binding_shapes_specified
 
         # Step 3: output bindings
-        for idx in range(len(self.engine.num_bindings)):
+        for idx in range(self.engine.num_bindings):
             if not self.engine.binding.is_input(idx) and \
                     self.engine.is_execution_binding(idx):
                 # name = self.engine.get_binding_name(idx)

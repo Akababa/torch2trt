@@ -16,11 +16,13 @@ ex_batch_size = 5
 
 config = gpt2.GPT2Config(n_layer=2, n_head=2, n_embd=4, vocab_size=10)
 model = gpt2.GPT2Model(config)
+if torch.cuda.is_available():
+    model.to(torch.device("cuda"))
 # [batch, heads, sequence, embed]
 past_dummy_shape = (ex_batch_size, config.n_head, past_dummy_seq_length, config.n_embd // config.n_head)
 past_prof = np.array([past_dummy_shape] * 3)  # [(x, x, x) for x in past_dummy_shape]
 past_prof[:, -2] = (1, 256, 1024)
-past_prof[:, 0] = (1, 1, 10)
+# past_prof[:, 0] = (1, 1, 10)
 
 input_names = ["input_ids"]
 # [batch, sequence]
@@ -31,7 +33,7 @@ inputs = [torch.zeros(input_dummy_shape, dtype=torch.int32)]
 opt_profile = [None]
 opt_profile[0] = np.array([input_dummy_shape] * 3)
 opt_profile[0][:, -1] = (1, 1, 1024)
-opt_profile[0][:, 0] = (1, 1, 10)
+# opt_profile[0][:, 0] = (1, 1, 10)
 
 for kv in "kv":
     for layer_idx in range(config.n_layer):
@@ -48,11 +50,12 @@ with torch.no_grad():
     # probs, pasts = model(**{name: value for name, value in zip(input_names, inputs)})
     # print(probs, pasts)
     # print(inputs[0].shape,inputs[1].shape)
-    flags = (1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
+    # flags = (1 << int(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
     model_trt = torch2trt.torch2trt(model,
                                     inputs=inputs,
                                     input_names=input_names,
+                                    output_names=["probs"],
                                     optimization_profile=opt_profile,
-                                    build_flags=flags,
+                                    # build_flags=flags,
                                     fp16_mode=True,
                                     max_workspace_size=2**20)

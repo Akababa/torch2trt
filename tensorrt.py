@@ -239,6 +239,9 @@ class IOptimizationProfile:
     def set_shape(self, name, min, opt, max):
         pass
 
+class ICudaEngine:
+    def __init__(self):
+        self.num_bindings = 0
 
 class Logger:
     ERROR = 1
