@@ -1,13 +1,10 @@
 from ..conversion_context import *
 
 
-
-
 @tensorrt_converter('torch.Tensor.size')
 def convert_size(ctx: ConversionContext):
     if ctx.has_implicit_batch():  # this mode has no dynamic shapes
         return
-    # input = ctx.method_args[0]  # type: torch.Tensor
     input_trt = ctx.get_arg("self", 0, to_trt=True)
     trt_dim = ctx.get_trt_dim("_int", 1, None, ndims=len(input_trt.shape))
     output = ctx.method_return

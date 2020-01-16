@@ -55,38 +55,45 @@ class ConversionContext(object):
             tensors = [self.convert_dtype_to(t, max_type) for t in tensors]
 
         broadcast_num_dim = max(len(t.shape) for t in tensors)
-        new_tensors = [self.make_broadcastable_to(t, broadcast_num_dim) for t in tensors]
-        all_dims_set = [set(nt.shape[i] for nt in new_tensors) - {1, -1} for i in range(broadcast_num_dim)]
-        assert all(len(dims_set) <= 1 for dims_set in all_dims_set)
-        return new_tensors
+        new_tensors = [make_broadcastable_to(self, t, broadcast_num_dim) for t in tensors]
+        for i in range(broadcast_num_dim):
+            dims_set = set(nt.shape[i] for nt in new_tensors) - {1, -1}
+            assert len(dims_set) <= 1
 
-    # If len(trt_tensor.shape) < broadcast_num_dim, prepends [1] dims to match number of dims in shape
-    def make_broadcastable_to(self, trt_tensor: trt.ITensor, broadcast_num_dim: int):
-        assert isinstance(trt_tensor, trt.ITensor)
-        trt_num_dims = len(trt_tensor.shape)
-        assert trt_num_dims <= broadcast_num_dim
-        if trt_num_dims < broadcast_num_dim:
-            # append 1 size dims to front
-            diff = broadcast_num_dim - trt_num_dims
-            shape = tuple([1] * diff + list(trt_tensor.shape))
-            trt_tensor = self.reshape_to(trt_tensor, shape)
-        return trt_tensor
+        return new_tensors
 
     def reshape_to(self, trt_tensor: trt.ITensor, new_shape):
         if new_shape == (1,) and id(trt_tensor) in self._up1:
             return self._up1[id(trt_tensor)]
-        layer = self.network.add_shuffle(trt_tensor)
 
         # try to keep the old dims by replacing with 0
         old_shape_trt = self._shape_refs.get(id(trt_tensor), None)
         if old_shape_trt is not None:
-            assert -1 not in old_shape_trt and len(old_shape_trt) == len(trt_tensor.shape)
-            maxi = 0
-            for i, (osi, nsi) in enumerate(zip(old_shape_trt, new_shape)):
-                if not (isinstance(nsi, int) or nsi is osi):
-                    maxi = i
+            assert -1 not in old_shape_trt and len(old_shape_trt) == len(
+                trt_tensor.shape), f"{old_shape_trt}, {trt_tensor.shape}"
+
+            # def idx_of(ns_i):
+            #     for ii, os_i in enumerate(old_shape_trt):
+            #         if (isinstance(ns_i, int) and isinstance(os_i, int) and ns_i == os_i) or ns_i is os_i:
+            #             return ii
+            #     return None
+
+            maxi_left = 0
+            # matches = []
+            for i, (os_i, ns_i) in enumerate(zip(old_shape_trt, new_shape)):
+                if (isinstance(ns_i, int) and isinstance(os_i, int) and ns_i == os_i) or ns_i is os_i:
+                    maxi_left = i
                     break
-            new_shape = (0,) * maxi + new_shape[maxi:]
+                    # matches.append(nsi_idx_in_os)
+            # TODO more dim matching
+            # maxi_right = len()
+            # for i, (osi, nsi) in reversed(enumerate(zip(old_shape_trt, new_shape))):
+            #     if not thesame(nsi, osi):
+            #         maxi_right = i
+            #         break
+            new_shape = (0,) * maxi_left + new_shape[maxi_left:]
+
+        layer = self.network.add_shuffle(trt_tensor)
 
         if all(isinstance(d, int) for d in new_shape):
             assert new_shape.count(-1) <= 1
@@ -101,7 +108,7 @@ class ConversionContext(object):
 
     # TODO use this everywhere
     def make_shape_tensor(self, shape):
-        # Makes a 1d shape trt tensor
+        # Makes a 1d shape trt tensor from a mixed tuple (of python ints and trt scalars)
         trt_dims = [self.get_trt_one(t) for t in shape]
         trt_dims = [self.reshape_to(t, (1,)) for t in trt_dims]
         layer = self.network.add_concatenation(trt_dims)
@@ -436,5 +443,25 @@ def _get_tuple_of_shape(ctx, t: trt.ITensor) -> Tuple[Union[int, trt.ITensor]]:
             new_output_trt.append(output_dim_trt)
         else:
             new_output_trt.append(input_dim)
-    assert len(new_output_trt) == len(t.shape) and -1 not in new_output_trt
+    assert -1 not in new_output_trt and len(new_output_trt) == len(t.shape), \
+        f"{new_output_trt}, {t.shape}"
     return tuple(new_output_trt)
+
+
+# If len(trt_tensor.shape) < broadcast_num_dim, prepends [1] dims to match number of dims in shape
+def make_broadcastable_to(ctx, trt_tensor: trt.ITensor, broadcast_num_dim: int) -> trt.ITensor:
+    assert isinstance(trt_tensor, trt.ITensor)
+    trt_num_dims = len(trt_tensor.shape)
+    assert trt_num_dims <= broadcast_num_dim
+    if trt_num_dims < broadcast_num_dim:
+        # append 1 size dims to front
+        diff = broadcast_num_dim - trt_num_dims
+        # shape = tuple([1] * diff + list(trt_tensor.shape))
+        shuffle_layer = ctx.network.add_shuffle(trt_tensor)
+        shuffle_layer.reshape_dims = (0,) * trt_num_dims + (1,) * diff
+        shuffle_layer.second_transpose = tuple(range(trt_num_dims, broadcast_num_dim)) \
+                                         + tuple(range(trt_num_dims))
+        # trt_tensor = self.reshape_to(trt_tensor, shape)
+        trt_tensor = shuffle_layer.get_output(0)
+    assert len(trt_tensor.shape) == broadcast_num_dim
+    return trt_tensor

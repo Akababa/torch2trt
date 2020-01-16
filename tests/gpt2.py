@@ -9,7 +9,7 @@ import torch.nn as nn
 from torch.nn import ModuleList
 from transformers.configuration_gpt2 import GPT2Config
 from transformers.modeling_gpt2 import load_tf_weights_in_gpt2
-from transformers.modeling_utils import PreTrainedModel, Conv1D, prune_conv1d_layer
+from transformers.modeling_utils import PreTrainedModel, prune_conv1d_layer
 
 logger = logging.getLogger(__name__)
 
@@ -24,6 +24,27 @@ GPT2_PRETRAINED_MODEL_ARCHIVE_MAP = {
 # TODO use BERT plugins .cu once i get this working..
 def gelu(x):
     return 0.5 * x * (1 + torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * torch.pow(x, 3))))
+
+
+class Conv1D(nn.Module):
+    def __init__(self, nf, nx):
+        """ Conv1D layer as defined by Radford et al. for OpenAI GPT (and also used in GPT-2)
+            Basically works like a Linear layer but the weights are transposed
+        """
+        super(Conv1D, self).__init__()
+        self.nf = nf
+        w = torch.empty(nx, nf)
+        nn.init.normal_(w, std=0.02)
+        self.weight = nn.Parameter(w)
+        self.bias = nn.Parameter(torch.zeros(nf))
+
+    def forward(self, x):
+        nx = self.weight.shape[0]
+        assert x.size(-1) == nx
+        size_out = x.size()[:-1] + (self.nf,)
+        x = torch.addmm(self.bias, x.view(-1, nx), self.weight)
+        x = x.view(size_out[0], -1, self.nf)
+        return x
 
 
 # torch.nn.Conv1d
