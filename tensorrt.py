@@ -1,6 +1,6 @@
 # Mock for tensorrt, like pycharm stubs
 from enum import Enum
-from typing import Callable
+from typing import Callable, Tuple
 import numpy as np
 
 
@@ -99,6 +99,9 @@ class ILayer:
                 shape[self.axis] = sum(cataxis)
             if self.axis == 0 and cats[0].shape == (1,):
                 self.torch_value = np.concatenate([inp.torch_value for inp in cats], axis=self.axis)
+        elif self.name == "fully_connected":
+            shape = list(self.inputs[0].shape)
+            shape[-3] = self.inputs[2].shape[0]
         else:
             print(f"no mock shape for {self.name}")
         assert shape is not None, "shape mocking failed"
@@ -200,6 +203,8 @@ class ILoop(ILayer):
 
 
 class ITensor:
+    shape: Tuple[int]
+
     def __init__(self):
         # self.name = ""
         self.shape = None
@@ -217,6 +222,7 @@ class ITensor:
 class IBuilderConfig:
     def set_flag(self, flag):
         pass
+
     def add_optimization_profile(self, prof):
         pass
 
@@ -256,6 +262,8 @@ class ICudaEngine:
 class Logger:
     ERROR = 1
     WARNING = 2
+    INFO = 3
+    VERBOSE = 4
 
     def __init__(self, min_severity=WARNING):
         self.min_severity = min_severity
@@ -295,7 +303,8 @@ class Weights:
 TensorLocation = Enum("TensorLocation", "DEVICE HOST")
 BuilderFlag = Enum("BuilderFlag", "GPU_FALLBACK REFIT DEBUG STRICT_TYPES INT8 FP16")
 DeviceType = Enum("DeviceType", "GPU DLA")
-ElementWiseOperation = Enum("ElementWiseOperation", "SUM SUB DIV MIN MAX POW MUL PROD")
+ElementWiseOperation = Enum("ElementWiseOperation",
+                            "EQUAL DIV SUB POW LESS OR MIN FLOOR_DIV GREATER XOR MAX AND PROD SUM")
 ActivationType = Enum("ActivationType", "TANH RELU")
 float32, float16, int8, int32, _ = DataType
 UnaryOperation = Enum("UnaryOperation", "EXP LOG SQRT RECIP ABS NEG SIN COS TAN SINH COSH ASIN ACOS ATAN CEIL FLOOR")

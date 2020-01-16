@@ -54,6 +54,7 @@ def torch2trt(module,
         config.set_flag(trt.BuilderFlag.STRICT_TYPES)
     if use_DLA:
         config.default_device_type = trt.DeviceType.DLA
+        config.set_flag(trt.BuilderFlag.GPU_FALLBACK)
 
     if int8_mode:
         # default to use input tensors for calibration

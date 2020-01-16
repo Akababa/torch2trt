@@ -76,6 +76,18 @@ class ConversionContext(object):
         if new_shape == (1,) and id(trt_tensor) in self._up1:
             return self._up1[id(trt_tensor)]
         layer = self.network.add_shuffle(trt_tensor)
+
+        # try to keep the old dims by replacing with 0
+        old_shape_trt = self._shape_refs.get(id(trt_tensor), None)
+        if old_shape_trt is not None:
+            assert -1 not in old_shape_trt and len(old_shape_trt) == len(trt_tensor.shape)
+            maxi = 0
+            for i, (osi, nsi) in enumerate(zip(old_shape_trt, new_shape)):
+                if not (isinstance(nsi, int) or nsi is osi):
+                    maxi = i
+                    break
+            new_shape = (0,) * maxi + new_shape[maxi:]
+
         if all(isinstance(d, int) for d in new_shape):
             assert new_shape.count(-1) <= 1
             layer.reshape_dims = new_shape
@@ -164,6 +176,13 @@ class ConversionContext(object):
             array = array.astype(np.int32)
         return self.network.add_constant(shape, array).get_output(0)
 
+    def get_shape_tuple(self, trt_tensor) -> Tuple[Union[int, trt.ITensor]]:
+        shape = self._shape_refs.get(id(trt_tensor), None)
+        if shape is None:
+            shape = _get_tuple_of_shape(self, trt_tensor)
+            self._shape_refs[id(trt_tensor)] = shape
+        return shape
+
     def add_inputs(self, torch_inputs, input_shapes=None, names=None):
         if names is None:
             names = ['input_%d' % i for i in range(len(torch_inputs))]
@@ -249,6 +268,7 @@ class ConversionContext(object):
         self.method_str = None
         self._first_input = None
         self._up1 = dict()  # for fewer unnecessary reshapes
+        self._shape_refs = dict()  # (id of trt.ITensor)->tuple[Union[int, trt.ITensor]]
         # We keep a dict so we can track ints for dynamic size
         # self._trt = dict()  # type: Dict[int, trt.ITensor]
         self.hooks = []
@@ -402,3 +422,19 @@ def tensorrt_converter(method: str, is_real=True):
         return converter
 
     return register_converter
+
+
+def _get_tuple_of_shape(ctx, t: trt.ITensor) -> Tuple[Union[int, trt.ITensor]]:
+    # ndims = len(t.shape)
+    if -1 in t.shape:
+        trt_dyn_shape = ctx.network.add_shape(t).get_output(0)
+    new_output_trt = []
+    # Detect static/dynamic dims and output either python_int/trt_scalar
+    for idx, input_dim in enumerate(t.shape):
+        if input_dim == -1:  # make it a torch tensor and add ._trt attribute to it
+            output_dim_trt = ctx.get_dim_of_shape(trt_dyn_shape, idx)
+            new_output_trt.append(output_dim_trt)
+        else:
+            new_output_trt.append(input_dim)
+    assert len(new_output_trt) == len(t.shape) and -1 not in new_output_trt
+    return tuple(new_output_trt)

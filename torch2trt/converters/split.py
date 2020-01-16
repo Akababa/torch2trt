@@ -1,6 +1,5 @@
 from ..conversion_context import *
 from torch2trt.module_test import add_module_test
-from .size import get_tuple_of_shape
 
 
 @tensorrt_converter('torch.split')
@@ -28,7 +27,7 @@ def convert_split(ctx: ConversionContext):
         sizes = input_trt_shape
         sizes[trt_dim] = split_size
     else:  # need dynamic shape
-        sizes = list(get_tuple_of_shape(ctx, input_trt))
+        sizes = list(ctx.get_shape_tuple(input_trt))
         sizes[trt_dim] = split_size
 
     # add slice layers

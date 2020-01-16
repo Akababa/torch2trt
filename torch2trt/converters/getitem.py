@@ -85,23 +85,14 @@ def convert_tensor_getitem(ctx: ConversionContext):
     #     assert len(new_slices) == len(input_trt.shape)
 
     # Step 3 - Add slice layer
-
+    input_trt_shape = input_trt.shape
     if -1 in input_trt.shape:
-        input_trt_shape = ctx.network.add_shape(input_trt).get_output(0)
+        input_trt_shape = ctx.get_shape_tuple(input_trt)
     starts, sizes, strides = [], [], []
     removed_axes = []
     for i, s in enumerate(new_slices):
-        if input_trt.shape[i] == -1:  # dynamic size
-            input_shape_i = ctx.get_dim_of_shape(input_trt_shape, i)
-        else:  # static size for this dim
-            input_shape_i = input_trt.shape[i]
-            # raise NotImplementedError("sorry no dynamic sizes")
-            # if s == slice(None, None, None):
-            #     # dynamic input size - only support full slices for now
-            #     input_size = ctx.network.add_slice(
-            #         input_trt_shape, [i], [1], [1]).get_output(0)
         if isinstance(s, slice):
-            start, size, stride = slice_to_trt(ctx, input_shape_i, s)
+            start, size, stride = slice_to_trt(ctx, input_trt_shape[i], s)
             starts.append(start)
             sizes.append(size)
             strides.append(stride)

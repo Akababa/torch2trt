@@ -80,6 +80,7 @@ class TRTModule(torch.nn.Module):
                     print(f"Setting binding shape {name}, {idx} to {input_dict[name].shape}")
                     self.context.set_binding_shape(idx, input_dict[name].shape)
                 if self.engine.is_execution_binding(idx):
+                    print(f"Setting execution binding {name}, {idx}")
                     bindings[idx] = input_dict[name]
 
         assert self.context.all_binding_shapes_specified
@@ -88,10 +89,11 @@ class TRTModule(torch.nn.Module):
         for idx in range(self.engine.num_bindings):
             if not self.engine.binding_is_input(idx) and \
                     self.engine.is_execution_binding(idx):
-                # name = self.engine.get_binding_name(idx)
+                name = self.engine.get_binding_name(idx)
                 dtype = torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
                 device = torch_device_from_trt(self.engine.get_location(idx))
                 shape = tuple(self.context.get_binding_shape(idx))  # Infer output shape using TRT
+                print(f"Computed output shape {shape} for {name}")
                 bindings[idx] = torch.empty(size=shape, dtype=dtype, device=device)
 
         return bindings

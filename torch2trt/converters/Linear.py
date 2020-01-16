@@ -9,7 +9,7 @@ def convert_Linear(ctx: ConversionContext):
     output = ctx.method_return
 
     # reshape to ...xNx1x1
-    input_trt_n11 = ctx.reshape_to(input_trt, tuple(input_trt.shape) + (1, 1))
+    input_trt_n11 = ctx.reshape_to(input_trt, (0,) * len(input_trt.shape) + (1, 1))
 
     bias = trt.Weights(torch_dtype_to_trt(module.weight.dtype))
     if module.bias is not None:
@@ -23,7 +23,7 @@ def convert_Linear(ctx: ConversionContext):
         bias=bias).get_output(0)
 
     # reshape back to N
-    output._trt = ctx.reshape_to(fc_out_trt, tuple(output.shape[ctx.nonbatch_dim:]))
+    output._trt = ctx.reshape_to(fc_out_trt, (0,) * len(input_trt.shape))
 
 
 @add_module_test(torch.float32, torch.device('cuda'), [(1, 10)])

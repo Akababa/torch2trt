@@ -1,19 +1,6 @@
 from ..conversion_context import *
 
 
-def get_tuple_of_shape(ctx, t: trt.ITensor):
-    # ndims = len(t.shape)
-    if -1 in t.shape:
-        trt_dyn_shape = ctx.network.add_shape(t).get_output(0)
-    new_output_trt = []
-    # Detect static/dynamic dims and output either python_int/trt_scalar
-    for idx, input_dim in enumerate(t.shape):
-        if input_dim == -1:  # make it a torch tensor and add ._trt attribute to it
-            output_dim_trt = ctx.get_dim_of_shape(trt_dyn_shape, idx)
-            new_output_trt.append(output_dim_trt)
-        else:
-            new_output_trt.append(input_dim)
-    return tuple(new_output_trt)
 
 
 @tensorrt_converter('torch.Tensor.size')
@@ -30,12 +17,12 @@ def convert_size(ctx: ConversionContext):
     if trt_dim is not None:  # Tensor.size(_int), index into the shape
         assert isinstance(output, int)
         if input_trt.shape[trt_dim] == -1:
-            trt_dyn_shape = ctx.network.add_shape(input_trt).get_output(0)
+            trt_shape_tuple = ctx.get_shape_tuple(input_trt)
             output = torch.tensor(output, dtype=torch.int32)
-            output._trt = ctx.get_dim_of_shape(trt_dyn_shape, trt_dim)
+            output._trt = trt_shape_tuple[trt_dim]
     else:  # Tensor.size(), get the full shape
         assert isinstance(output, torch.Size)
-        new_output_trt = get_tuple_of_shape(ctx, input_trt)
+        new_output_trt = ctx.get_shape_tuple(input_trt)
         new_outputs = []
         for output_dim, output_trt_dim in zip(output, new_output_trt):
             if isinstance(output_trt_dim, trt.ITensor):
