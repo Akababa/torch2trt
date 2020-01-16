@@ -6,7 +6,7 @@ import numpy as np
 
 class ILayer:
     def __init__(self):
-        self.name = ""
+        self.opname = ""
         self.dtype = DataType.FLOAT
         self.inputs = []
         self.kwargs = dict()
@@ -20,12 +20,12 @@ class ILayer:
         while len(self.inputs) <= i:
             self.inputs.append(None)
         self.inputs[i] = inp
-        if self.name == "shuffle":
+        if self.opname == "shuffle":
             if i == 1:
                 self.reshape_dims = inp
-        elif self.name == "concatenation":
+        elif self.opname == "concatenation":
             self.reshape_dims = inp
-        if self.name == "slice":
+        if self.opname == "slice":
             if i == 1:
                 self.start = inp
             if i == 2:
@@ -35,13 +35,13 @@ class ILayer:
 
     def __find_shape(self):
         shape = self.__yolo_shape()
-        if self.name in ("constant",):
+        if self.opname in ("constant",):
             shape = self.inputs[1].shape
             self.torch_value = self.inputs[1]
-        elif self.name in ("shape",):
+        elif self.opname in ("shape",):
             shape = (len(self.inputs[0].shape),)
             self.torch_value = self.inputs[0].shape
-        elif self.name in ("slice",):
+        elif self.opname in ("slice",):
             shape = self.inputs[2]
             if shape == (1,):  # for slicing a shape tensor
                 myslices = [slice(st, st + si, 1 if stride == 0 else stride) for st, si, stride in
@@ -50,7 +50,7 @@ class ILayer:
                 self.torch_value = self.inputs[0].torch_value.__getitem__(myslices)
             else:
                 shape = shape.torch_value
-        elif self.name in ("shuffle",):
+        elif self.opname in ("shuffle",):
             shape = self.inputs[0].shape
             if hasattr(self, "first_transpose"):
                 shape = [shape[i] for i in self.first_transpose]
@@ -63,18 +63,18 @@ class ILayer:
                 shape = [shape[i] for i in self.second_transpose]
             if len(shape) <= 1:
                 self.torch_value = np.array(self.torch_value).reshape(shape)
-        elif self.name in ("gather",):
+        elif self.opname in ("gather",):
             shape = list(self.inputs[1].shape)
             shape.append(self.inputs[0].shape[-1])
-        elif self.name in ("matrix_multiply",):
+        elif self.opname in ("matrix_multiply",):
             m1, m2 = self.inputs[0], self.inputs[2]
             shape = (*m1.shape[:-1], m2.shape[-1])
-        elif self.name in ("unary",):
+        elif self.opname in ("unary",):
             shape = self.inputs[0].shape
-        elif self.name in ("elementwise",):
+        elif self.opname in ("elementwise",):
             shape = tuple(-1 if -1 in (i0, i1) else max(i0, i1)
                           for i0, i1 in zip(self.inputs[0].shape, self.inputs[1].shape))
-        elif self.name in ("reduce",):
+        elif self.opname in ("reduce",):
             shape = list(self.inputs[0].shape)
             axes = self.inputs[2]
             keep_dims = self.inputs[3]
@@ -89,7 +89,7 @@ class ILayer:
             for axis in axes_list:
                 shape[axis] = 1 if keep_dims else None
             shape = tuple(d for d in shape if d is not None)
-        elif self.name in ("concatenation",):
+        elif self.opname in ("concatenation",):
             cats = self.inputs[0]
             shape = list(cats[0].shape)
             cataxis = [inp.shape[self.axis] for inp in cats]
@@ -99,11 +99,11 @@ class ILayer:
                 shape[self.axis] = sum(cataxis)
             if self.axis == 0 and cats[0].shape == (1,):
                 self.torch_value = np.concatenate([inp.torch_value for inp in cats], axis=self.axis)
-        elif self.name == "fully_connected":
+        elif self.opname == "fully_connected":
             shape = list(self.inputs[0].shape)
             shape[-3] = self.inputs[2].shape[0]
         else:
-            print(f"no mock shape for {self.name}")
+            print(f"no mock shape for {self.opname}")
         assert shape is not None, "shape mocking failed"
         return tuple(map(int, shape))
 
@@ -156,7 +156,7 @@ class ILayer:
         iten.dtype = self.dtype
         iten.torch_value = self.torch_value
         iten.last_layer = self
-        # if self.name == "concatenation":
+        iten.name = f"({self.name}) [{self.opname}]_output"
 
         return iten
 
@@ -164,6 +164,7 @@ class ILayer:
 class INetworkDefinition:
     def __init__(self):
         self.has_implicit_batch_dimension = False
+        self.num_layers = 0
 
     def add_input(self, name, dtype, shape):
         ten = ITensor()
@@ -180,13 +181,15 @@ class INetworkDefinition:
 
     def __getattr__(self, name):
         if name[:4] == "add_":
-            return make_add_layer_func(name[4:])
+            self.num_layers += 1
+            return make_add_layer_func(name[4:], self.num_layers)
 
 
-def make_add_layer_func(layer_name):
+def make_add_layer_func(layer_name, i):
     def add_layer(*inputs, **kwargs):
         layer = ILayer()
-        layer.name = layer_name
+        layer.name = f"Unnamed Layer* {i}"
+        layer.opname = layer_name
         layer.inputs = list(inputs) + list(kwargs.values())
         layer.kwargs = kwargs
         return layer

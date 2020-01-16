@@ -51,7 +51,7 @@ class ConversionContext(object):
         if len(set(t.dtype for t in tensors)) > 1:
             types = [trt.int8, trt.int32, trt.float16, trt.float32]
             max_type = types[max(types.index(t.dtype) for t in tensors)]
-            print(f"promoting {[t.dtype for t in tensors]} to {max_type}")  # TODO type promotion
+            print(f"promoting {[t.dtype for t in tensors]} to {max_type}")
             tensors = [self.convert_dtype_to(t, max_type) for t in tensors]
 
         broadcast_num_dim = max(len(t.shape) for t in tensors)
@@ -63,11 +63,12 @@ class ConversionContext(object):
         return new_tensors
 
     def reshape_to(self, trt_tensor: trt.ITensor, new_shape):
-        if new_shape == (1,) and id(trt_tensor) in self._up1:
-            return self._up1[id(trt_tensor)]
+        assert isinstance(trt_tensor, trt.ITensor)
+        if new_shape == (1,) and trt_tensor.name in self._up1:
+            return self._up1[trt_tensor.name]
 
         # try to keep the old dims by replacing with 0
-        old_shape_trt = self._shape_refs.get(id(trt_tensor), None)
+        old_shape_trt = self._shape_refs.get(trt_tensor.name, None)
         if old_shape_trt is not None:
             assert -1 not in old_shape_trt and len(old_shape_trt) == len(
                 trt_tensor.shape), f"{old_shape_trt}, {trt_tensor.shape}"
@@ -103,7 +104,8 @@ class ConversionContext(object):
             layer.set_input(1, new_shape_tensor)
         trt_out = layer.get_output(0)
         if new_shape == ():
-            self._up1[id(trt_out)] = trt_tensor
+            assert tuple(trt_tensor.shape) == (1,)
+            self._up1[trt_out.name] = trt_tensor
         return trt_out
 
     # TODO use this everywhere
@@ -184,10 +186,10 @@ class ConversionContext(object):
         return self.network.add_constant(shape, array).get_output(0)
 
     def get_shape_tuple(self, trt_tensor) -> Tuple[Union[int, trt.ITensor]]:
-        shape = self._shape_refs.get(id(trt_tensor), None)
+        shape = self._shape_refs.get(trt_tensor.name, None)
         if shape is None:
             shape = _get_tuple_of_shape(self, trt_tensor)
-            self._shape_refs[id(trt_tensor)] = shape
+            self._shape_refs[trt_tensor.name] = shape
         return shape
 
     def add_inputs(self, torch_inputs, input_shapes=None, names=None):
@@ -275,7 +277,7 @@ class ConversionContext(object):
         self.method_str = None
         self._first_input = None
         self._up1 = dict()  # for fewer unnecessary reshapes
-        self._shape_refs = dict()  # (id of trt.ITensor)->tuple[Union[int, trt.ITensor]]
+        self._shape_refs = dict()  # (name of trt.ITensor)->tuple[Union[int, trt.ITensor]]
         # We keep a dict so we can track ints for dynamic size
         # self._trt = dict()  # type: Dict[int, trt.ITensor]
         self.hooks = []
@@ -459,8 +461,8 @@ def make_broadcastable_to(ctx, trt_tensor: trt.ITensor, broadcast_num_dim: int) 
         # shape = tuple([1] * diff + list(trt_tensor.shape))
         shuffle_layer = ctx.network.add_shuffle(trt_tensor)
         shuffle_layer.reshape_dims = (0,) * trt_num_dims + (1,) * diff
-        shuffle_layer.second_transpose = tuple(range(trt_num_dims, broadcast_num_dim)) \
-                                         + tuple(range(trt_num_dims))
+        shuffle_layer.second_transpose = \
+            tuple(range(trt_num_dims, broadcast_num_dim)) + tuple(range(trt_num_dims))
         # trt_tensor = self.reshape_to(trt_tensor, shape)
         trt_tensor = shuffle_layer.get_output(0)
     assert len(trt_tensor.shape) == broadcast_num_dim

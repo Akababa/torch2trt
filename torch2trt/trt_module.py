@@ -34,6 +34,7 @@ class TRTModule(torch.nn.Module):
         self.input_names = input_names
         self.output_names = output_names
         self.bindings = [None] * self.engine.num_bindings
+        self.exec_async = False
 
     def _on_state_dict(self, state_dict, prefix, local_metadata):
         state_dict[prefix + 'engine'] = bytearray(self.engine.serialize())
@@ -54,8 +55,12 @@ class TRTModule(torch.nn.Module):
     def forward(self, *inputs):
         self.set_input_bindings(inputs)
 
-        self.context.execute_v2([t.data_ptr()
-                                 if t is not None else 0 for t in self.bindings])
+        bindings_ptr = [t.data_ptr()
+                        if t is not None else 0 for t in self.bindings]
+        if self.exec_async:
+            self.context.execute_async_v2(bindings_ptr, torch.cuda.current_stream().cuda_stream)
+        else:
+            self.context.execute_v2(bindings_ptr)
 
         outputs = [self.bindings[self.engine.get_binding_index(oname)] for oname in self.output_names]
         return outputs[0] if len(outputs) == 1 else tuple(outputs)
