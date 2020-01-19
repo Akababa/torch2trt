@@ -21,7 +21,7 @@ def convert_cat(ctx: ConversionContext):
     ndims = len(trt_inputs[0].shape)  # before stack
     new_axis = ctx.get_trt_dim(pos=1, default=0, ndims=ndims)
 
-    trt_inputs_unsqueezed = [insert_dim(ctx, tt, new_axis) for tt in trt_inputs]
+    trt_inputs_unsqueezed = [insert_dim(ctx, tt, [new_axis]) for tt in trt_inputs]
 
     layer = ctx.network.add_concatenation(trt_inputs_unsqueezed)
     layer.axis = new_axis

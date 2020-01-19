@@ -29,21 +29,26 @@ def slice_to_trt(ctx, dim_size, dim_slice):
         return start, size, stride
 
 
-# TODO gather for list
+def gather_one(ctx, input_trt, idx, axis):
+    idx_trt = ctx.get_trt_one(idx)
+    # idx_trt = ctx.reshape_to(idx_trt, (1,))
+    return ctx.network.add_gather(input_trt, idx_trt, axis).get_output(0)
+
+
+# TODO gather for list and individual indices
 # THIS DOES NOT ASSUME IMPLICIT BATCH DIM, UNLIKE EVERY OTHER CONVERTER
 @tensorrt_converter('torch.Tensor.__getitem__')
 def convert_tensor_getitem(ctx: ConversionContext):
     input_trt = ctx.get_trt_one(ctx.method_args[0])
     slices = ctx.method_args[1]
-    if isinstance(slices, (int, slice)):
+    if isinstance(slices, (int, slice, torch.Tensor)):
         slices = (slices,)
     if isinstance(slices, list):
         raise NotImplementedError("List in getitem not supported")
-    output = ctx.method_return
+
     ndims = len(input_trt.shape)
 
     # Step 1 - Replace ellipsis with expanded slices
-
     num_ellipsis = ndims - len(slices)  # num_slice_types(slices)
 
     def to_trt_keeping_constant(t):
@@ -54,6 +59,7 @@ def convert_tensor_getitem(ctx: ConversionContext):
         else:
             raise ValueError
 
+    # standardize slices
     new_slices = []
     for s in slices:
         if s == Ellipsis:
@@ -72,44 +78,52 @@ def convert_tensor_getitem(ctx: ConversionContext):
     # fill missing slices at end
     while len(new_slices) < ndims:
         new_slices.append(slice(None, None, None))
+
+    assert len(new_slices) == ndims
     # print("new_slices:",new_slices)
     # print("input shape:", input.shape)
     # print("input_trt shape:", input_trt.shape)
 
-    # # # Step 2 - Remove batch from slices (TRT from this point)
-    # if not is_const:
-    #     if new_slices[0] != slice(None, None, None):
-    #         raise ValueError(f"can't slice on batch dimension")  # TODO actually I can in explicit mode
-    #     new_slices = new_slices[1:]
-    #     # print("new_slices shrink to:", new_slices)
-    #     assert len(new_slices) == len(input_trt.shape)
+    # add gather layers
+    for axis in reversed(range(len(new_slices))):
+        if not isinstance(new_slices[axis], slice):
+            input_trt = gather_one(ctx, input_trt, new_slices[axis], axis)
+            new_slices.pop(axis)
 
     # Step 3 - Add slice layer
     input_trt_shape = input_trt.shape
     if -1 in input_trt.shape:
         input_trt_shape = ctx.get_shape_tuple(input_trt)
     starts, sizes, strides = [], [], []
-    removed_axes = []
+    # removed_axes = []
+    real_slice = False
     for i, s in enumerate(new_slices):
-        if isinstance(s, slice):
-            start, size, stride = slice_to_trt(ctx, input_trt_shape[i], s)
-            starts.append(start)
-            sizes.append(size)
-            strides.append(stride)
-        elif isinstance(s, (int, trt.ITensor)):
-            removed_axes.append(i)
-            starts.append(s)
-            sizes.append(1)
-            strides.append(1)
-        else:
-            raise ValueError("Invalid slice")
+        assert isinstance(s, slice)
+        if s != slice(None, None, None):
+            real_slice = True
+        # if isinstance(s, slice):
+        start, size, stride = slice_to_trt(ctx, input_trt_shape[i], s)
+        starts.append(start)
+        sizes.append(size)
+        strides.append(stride)
+        # elif isinstance(s, (int, trt.ITensor)):
+        #     removed_axes.append(i)
+        #     starts.append(s)
+        #     sizes.append(1)
+        #     strides.append(1)
+        # else:
+        #     raise ValueError("Invalid slice")
 
     # print("starts,sizes,strides:", starts, sizes, strides)
-    assert len(starts) == len(sizes) == len(strides) == ndims
-    output_trt = ctx.slice_tensor(input_trt, starts, sizes, strides)
+    assert len(starts) == len(sizes) == len(strides) == len(input_trt.shape)
+    if real_slice:
+        output_trt = ctx.slice_tensor(input_trt, starts, sizes, strides)
+    else:
+        output_trt = input_trt
 
     # Step 4 - remove int axes
-    output._trt = remove_dim(ctx, output_trt, removed_axes)
+    output = ctx.method_return
+    output._trt = output_trt  # remove_dim(ctx, output_trt, removed_axes)
 
 
 class LambdaModule(torch.nn.Module):

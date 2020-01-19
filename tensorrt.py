@@ -64,8 +64,12 @@ class ILayer:
             if len(shape) <= 1:
                 self.torch_value = np.array(self.torch_value).reshape(shape)
         elif self.opname in ("gather",):
-            shape = list(self.inputs[1].shape)
-            shape.append(self.inputs[0].shape[-1])
+            shape = list(self.inputs[0].shape)
+            shape.pop(self.inputs[2])
+            shapeidx = list(self.inputs[1].shape)
+            # shapeidx.pop()
+            shapeidx.extend(shape)
+            shape = shapeidx
         elif self.opname in ("matrix_multiply",):
             m1, m2 = self.inputs[0], self.inputs[2]
             shape = (*m1.shape[:-1], m2.shape[-1])
