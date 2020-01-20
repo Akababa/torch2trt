@@ -62,42 +62,30 @@ class ConversionContext(object):
 
         return new_tensors
 
-    def reshape_to(self, trt_tensor: trt.ITensor, new_shape):
+    def reshape_to(self, trt_tensor: trt.ITensor, new_shape: tuple):
         assert isinstance(trt_tensor, trt.ITensor)
-        if new_shape == (1,) and trt_tensor.name in self._up1:
-            return self._up1[trt_tensor.name]
+        assert all(isinstance(nsi, (int, trt.ITensor)) for nsi in new_shape)
 
         # try to keep the old dims by replacing with 0
         old_shape_trt = self._shape_refs.get(trt_tensor.name, None)
         if old_shape_trt is not None:
             assert -1 not in old_shape_trt and len(old_shape_trt) == len(
                 trt_tensor.shape), f"{old_shape_trt}, {trt_tensor.shape}"
+        else:
+            old_shape_trt = trt_tensor.shape
 
-            # def idx_of(ns_i):
-            #     for ii, os_i in enumerate(old_shape_trt):
-            #         if (isinstance(ns_i, int) and isinstance(os_i, int) and ns_i == os_i) or ns_i is os_i:
-            #             return ii
-            #     return None
+        def idx_matches(nsi, osi):
+            return (isinstance(nsi, trt.ITensor) and isinstance(osi, trt.ITensor) and nsi.name == osi.name) or \
+                   (isinstance(ns_i, int) and isinstance(os_i, int) and ns_i == os_i)
 
-            def idx_matches(nsi, osi):
-                return nsi is osi or \
-                       (isinstance(ns_i, int) and isinstance(os_i, int) and ns_i == os_i)
-
-            maxi_left = 0
-            # matches = []
-            for ns_i, os_i in zip(new_shape, old_shape_trt):
-                if idx_matches(ns_i, os_i):
-                    maxi_left += 1
-                else:
-                    break
-                    # matches.append(nsi_idx_in_os)
-            # TODO more dim matching
-            # maxi_right = len()
-            # for i, (osi, nsi) in reversed(enumerate(zip(old_shape_trt, new_shape))):
-            #     if not thesame(nsi, osi):
-            #         maxi_right = i
-            #         break
-            new_shape = (0,) * maxi_left + new_shape[maxi_left:]
+        maxi_left = 0
+        for ns_i, os_i in zip(new_shape, old_shape_trt):
+            if idx_matches(ns_i, os_i):
+                maxi_left += 1
+            else:
+                break
+        # TODO more dim matching
+        new_shape = (0,) * maxi_left + new_shape[maxi_left:]
 
         layer = self.network.add_shuffle(trt_tensor)
 
@@ -107,17 +95,13 @@ class ConversionContext(object):
         else:  # I have a tensor
             new_shape_tensor = self.make_shape_tensor(new_shape)
             layer.set_input(1, new_shape_tensor)
-        trt_out = layer.get_output(0)
-        if new_shape == ():
-            assert tuple(trt_tensor.shape) == (1,)
-            self._up1[trt_out.name] = trt_tensor
-        return trt_out
+        return layer.get_output(0)
 
     # TODO use this everywhere
     def make_shape_tensor(self, shape):
         # Makes a 1d shape trt tensor from a mixed tuple (of python ints and trt scalars)
         trt_dims = [self.get_trt_one(t) for t in shape]
-        trt_dims = [self.reshape_to(t, (1,)) for t in trt_dims]
+        trt_dims = [self._shape0to1(t) for t in trt_dims]
         layer = self.network.add_concatenation(trt_dims)
         layer.axis = 0
         return layer.get_output(0)
@@ -148,7 +132,25 @@ class ConversionContext(object):
 
     def get_dim_of_shape(self, trt_shape: trt.ITensor, trt_dim: int) -> trt.ITensor:
         trt_dyn_shape_dim = self.network.add_slice(trt_shape, (trt_dim,), (1,), (1,)).get_output(0)
-        return self.reshape_to(trt_dyn_shape_dim, ())
+        return self._shape1to0(trt_dyn_shape_dim)
+
+    def _shape1to0(self, t_1: trt.ITensor):
+        assert tuple(t_1.shape) == (1,)
+        layer = self.network.add_shuffle(t_1)
+        layer.reshape_dims = ()
+        t_0 = layer.get_output(0)
+        self._up1[t_0.name] = t_1
+        return t_0
+
+    def _shape0to1(self, t_0: trt.ITensor):
+        assert tuple(t_0.shape) == ()
+        if t_0.name in self._up1:
+            return self._up1[t_0.name]
+        layer = self.network.add_shuffle(t_0)
+        layer.reshape_dims = (1,)
+        t_1 = layer.get_output(0)
+        self._up1[t_0.name] = t_1
+        return t_1
 
     def get_arg(self, name, pos, default=_my_default, to_trt=False):
         if name in self.method_kwargs:
