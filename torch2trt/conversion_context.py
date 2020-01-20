@@ -27,7 +27,7 @@ class ConversionContext(object):
             t._trt = self._add_const_trt(t)
             trt_tensor = t._trt
             shape_ok(t)
-        # or... create and add constant for scalar primitive (lost reference) TODO
+        # or... create and add constant for scalar primitive (lost reference)
         elif isinstance(t, (float, int)):
             dtype = (torch.float32 if isinstance(t, float) else torch.int32)
             trt_tensor = self._add_const_trt(torch.tensor(t, dtype=dtype))
@@ -79,11 +79,16 @@ class ConversionContext(object):
             #             return ii
             #     return None
 
+            def idx_matches(nsi, osi):
+                return nsi is osi or \
+                       (isinstance(ns_i, int) and isinstance(os_i, int) and ns_i == os_i)
+
             maxi_left = 0
             # matches = []
-            for i, (os_i, ns_i) in enumerate(zip(old_shape_trt, new_shape)):
-                if (isinstance(ns_i, int) and isinstance(os_i, int) and ns_i == os_i) or ns_i is os_i:
-                    maxi_left = i
+            for ns_i, os_i in zip(new_shape, old_shape_trt):
+                if idx_matches(ns_i, os_i):
+                    maxi_left += 1
+                else:
                     break
                     # matches.append(nsi_idx_in_os)
             # TODO more dim matching

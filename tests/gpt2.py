@@ -95,7 +95,9 @@ class Attention(nn.Module):
 
     def forward(self, x, layer_past):
         x = self.c_attn(x)
-        query, key, value = x.split(self.split_size, dim=2)
+        x = x.view(*(x.size()[:-1] + (3, self.split_size)))
+        query, key, value = x[:, :, 0], x[:, :, 1], x[:, :, 2]
+        # query, key, value = x.split(self.split_size, dim=2)
         query = self.split_heads(query)
         key = self.split_heads(key, k=True)
         value = self.split_heads(value)

@@ -35,14 +35,6 @@ opt_profile[1] = np.array([past_dummy_shape] * 3)  # [(x, x, x) for x in past_du
 opt_profile[1][:, -2] = (1, 256, 1024)
 # opt_profile[1][:, 0] = (1, 1, 10)
 
-# for kv in "kv":
-#     for layer_idx in range(config.n_layer):
-#         input_name = f"past_{layer_idx}_{kv}"
-#         input_names.append(input_name)
-#         # input_shapes.append((-1, config.n_head, -1, config.n_embd // config.n_head))
-#         inputs.append(torch.zeros(past_dummy_shape))
-#         opt_profile.append(past_prof)
-
 # probs, pasts = model(input_ids=inputs[0].to(torch.long),
 #                      past=torch.zeros((config.n_layer, 2, ex_batch_size, config.n_head, past_dummy_seq_length,
 #                                        config.n_embd // config.n_head)))  # inputs[1].transpose(0, 1).transpose(1, 2))
