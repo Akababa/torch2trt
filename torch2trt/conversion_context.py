@@ -12,37 +12,42 @@ _my_default = object()  # dummy default
 # TODO FIX this by comparing dim sizes of input and input._trt!
 # TODO refactor the network operations into a network subclass
 class ConversionContext(object):
-    # TODO implicit type conversion
-    def get_trt_one(self, t: Union[torch.Tensor, float, int]) -> trt.ITensor:
-        if isinstance(t, trt.ITensor):
-            return t
-        # GET TRT TENSOR (OR CREATE TRT CONSTANT)
-        # get tensor w/ _trt
-        elif isinstance(t, torch.Tensor) and hasattr(t, '_trt'):
-            trt_tensor = t._trt
-            shape_ok(t)
-        # or... add constant for leaf tensor w/o _trt
-        elif isinstance(t, torch.Tensor) and not hasattr(t, '_trt'):
-            # add leaf tensor - don't exclude batch when adding constants...?
-            t._trt = self._add_const_trt(t)
-            trt_tensor = t._trt
-            shape_ok(t)
-        # or... create and add constant for scalar primitive (lost reference)
-        elif isinstance(t, (float, int)):
-            dtype = (torch.float32 if isinstance(t, float) else torch.int32)
-            trt_tensor = self._add_const_trt(torch.tensor(t, dtype=dtype))
+
+    def reshape_to(self, trt_tensor: trt.ITensor, new_shape: tuple):
+        assert isinstance(trt_tensor, trt.ITensor)
+        assert all(isinstance(nsi, (int, trt.ITensor)) for nsi in new_shape)
+
+        # try to keep the old dims by replacing with 0
+        old_shape_trt = self._shape_refs.get(trt_tensor.name, None)
+        if old_shape_trt is not None:
+            assert -1 not in old_shape_trt and len(old_shape_trt) == len(
+                trt_tensor.shape), f"{old_shape_trt}, {trt_tensor.shape}"
         else:
-            raise ValueError(f'Bad tensor of type {type(t)}')
+            # If I didn't find the shape ref, the passed reshape doesn't come from a size() anyway
+            old_shape_trt = trt_tensor.shape
 
-        assert trt_tensor.shape.__len__() >= 0
-        return trt_tensor
+        # We try to put as many 0 dims as possible, to tell TRT to keep existing axes
+        def idx_matches(nsi, osi):
+            return (isinstance(nsi, trt.ITensor) and isinstance(osi, trt.ITensor) and nsi.name == osi.name) or \
+                   (isinstance(ns_i, int) and isinstance(os_i, int) and ns_i == os_i)
 
-    def convert_dtype_to(self, tensor: trt.ITensor, dtype: trt.DataType):
-        assert isinstance(tensor, trt.ITensor) and isinstance(dtype, trt.DataType)
-        if tensor.dtype == dtype:
-            return tensor
-        layer = self.network.add_identity(tensor)
-        layer.set_output_type(0, dtype)
+        maxi_left = 0
+        for ns_i, os_i in zip(new_shape, old_shape_trt):
+            if idx_matches(ns_i, os_i):
+                maxi_left += 1
+            else:
+                break
+        # TODO more dim matching (using shuffle transforms)
+        new_shape = (0,) * maxi_left + new_shape[maxi_left:]
+
+        layer = self.network.add_shuffle(trt_tensor)
+
+        if all(isinstance(d, int) for d in new_shape):
+            assert new_shape.count(-1) <= 1
+            layer.reshape_dims = new_shape
+        else:  # I have a tensor
+            new_shape_tensor = self.make_shape_tensor(new_shape)
+            layer.set_input(1, new_shape_tensor)
         return layer.get_output(0)
 
     def broadcast_together(self, *tensors: trt.ITensor):
@@ -55,47 +60,12 @@ class ConversionContext(object):
             tensors = [self.convert_dtype_to(t, max_type) for t in tensors]
 
         broadcast_num_dim = max(len(t.shape) for t in tensors)
-        new_tensors = [make_broadcastable_to(self, t, broadcast_num_dim) for t in tensors]
+        new_tensors = [_make_broadcastable_to(self, t, broadcast_num_dim) for t in tensors]
         for i in range(broadcast_num_dim):
             dims_set = set(nt.shape[i] for nt in new_tensors) - {1, -1}
             assert len(dims_set) <= 1
 
         return new_tensors
-
-    def reshape_to(self, trt_tensor: trt.ITensor, new_shape: tuple):
-        assert isinstance(trt_tensor, trt.ITensor)
-        assert all(isinstance(nsi, (int, trt.ITensor)) for nsi in new_shape)
-
-        # try to keep the old dims by replacing with 0
-        old_shape_trt = self._shape_refs.get(trt_tensor.name, None)
-        if old_shape_trt is not None:
-            assert -1 not in old_shape_trt and len(old_shape_trt) == len(
-                trt_tensor.shape), f"{old_shape_trt}, {trt_tensor.shape}"
-        else:
-            old_shape_trt = trt_tensor.shape
-
-        def idx_matches(nsi, osi):
-            return (isinstance(nsi, trt.ITensor) and isinstance(osi, trt.ITensor) and nsi.name == osi.name) or \
-                   (isinstance(ns_i, int) and isinstance(os_i, int) and ns_i == os_i)
-
-        maxi_left = 0
-        for ns_i, os_i in zip(new_shape, old_shape_trt):
-            if idx_matches(ns_i, os_i):
-                maxi_left += 1
-            else:
-                break
-        # TODO more dim matching
-        new_shape = (0,) * maxi_left + new_shape[maxi_left:]
-
-        layer = self.network.add_shuffle(trt_tensor)
-
-        if all(isinstance(d, int) for d in new_shape):
-            assert new_shape.count(-1) <= 1
-            layer.reshape_dims = new_shape
-        else:  # I have a tensor
-            new_shape_tensor = self.make_shape_tensor(new_shape)
-            layer.set_input(1, new_shape_tensor)
-        return layer.get_output(0)
 
     # TODO use this everywhere
     def make_shape_tensor(self, shape):
@@ -151,6 +121,39 @@ class ConversionContext(object):
         t_1 = layer.get_output(0)
         self._up1[t_0.name] = t_1
         return t_1
+
+    # TODO implicit type conversion
+    def get_trt_one(self, t: Union[torch.Tensor, float, int]) -> trt.ITensor:
+        if isinstance(t, trt.ITensor):
+            return t
+        # GET TRT TENSOR (OR CREATE TRT CONSTANT)
+        # get tensor w/ _trt
+        elif isinstance(t, torch.Tensor) and hasattr(t, '_trt'):
+            trt_tensor = t._trt
+            shape_ok(t)
+        # or... add constant for leaf tensor w/o _trt
+        elif isinstance(t, torch.Tensor) and not hasattr(t, '_trt'):
+            # add leaf tensor - don't exclude batch when adding constants...?
+            t._trt = self._add_const_trt(t)
+            trt_tensor = t._trt
+            shape_ok(t)
+        # or... create and add constant for scalar primitive (lost reference)
+        elif isinstance(t, (float, int)):
+            dtype = (torch.float32 if isinstance(t, float) else torch.int32)
+            trt_tensor = self._add_const_trt(torch.tensor(t, dtype=dtype))
+        else:
+            raise ValueError(f'Bad tensor of type {type(t)}')
+
+        assert trt_tensor.shape.__len__() >= 0
+        return trt_tensor
+
+    def convert_dtype_to(self, tensor: trt.ITensor, dtype: trt.DataType):
+        assert isinstance(tensor, trt.ITensor) and isinstance(dtype, trt.DataType)
+        if tensor.dtype == dtype:
+            return tensor
+        layer = self.network.add_identity(tensor)
+        layer.set_output_type(0, dtype)
+        return layer.get_output(0)
 
     def get_arg(self, name, pos, default=_my_default, to_trt=False):
         if name in self.method_kwargs:
@@ -285,12 +288,8 @@ class ConversionContext(object):
         self._first_input = None
         self._up1 = dict()  # for fewer unnecessary reshapes
         self._shape_refs = dict()  # (name of trt.ITensor)->tuple[Union[int, trt.ITensor]]
-        # We keep a dict so we can track ints for dynamic size
-        # self._trt = dict()  # type: Dict[int, trt.ITensor]
-        self.hooks = []
-        for method, converter in converters.items():
-            # assert self.lock == False
-            self.hooks.append(ConversionHook(self, method, converter))
+        self.hooks = [ConversionHook(self, method, converter)
+                      for method, converter in converters.items()]
 
 
 class ConversionHook(object):
@@ -370,6 +369,8 @@ def _attach_converter(ctx: ConversionContext, method, converter, method_str):
             def stringer(t):
                 if isinstance(t, torch.Tensor):
                     return f"Tensor({tuple(t.shape)})"
+                elif isinstance(t, (int, float)):
+                    return f"{type(t).__name__}({t})"
                 elif isinstance(t, (list, tuple)):
                     return f"{type(t).__name__}[{stringer(t[0]) if len(t) > 0 else 'EMPTY'}]"
                 else:
@@ -458,7 +459,7 @@ def _get_tuple_of_shape(ctx, t: trt.ITensor) -> Tuple[Union[int, trt.ITensor]]:
 
 
 # If len(trt_tensor.shape) < broadcast_num_dim, prepends [1] dims to match number of dims in shape
-def make_broadcastable_to(ctx, trt_tensor: trt.ITensor, broadcast_num_dim: int) -> trt.ITensor:
+def _make_broadcastable_to(ctx, trt_tensor: trt.ITensor, broadcast_num_dim: int) -> trt.ITensor:
     assert isinstance(trt_tensor, trt.ITensor)
     trt_num_dims = len(trt_tensor.shape)
     assert trt_num_dims <= broadcast_num_dim

@@ -36,7 +36,7 @@ def gather_one(ctx, input_trt, idx, axis):
 
 
 # TODO gather for list and individual indices
-# TODO but gather is slower!! TEST
+# TODO but gather is slower!! TEST and revert this back to slice
 # THIS DOES NOT ASSUME IMPLICIT BATCH DIM, UNLIKE EVERY OTHER CONVERTER
 @tensorrt_converter('torch.Tensor.__getitem__')
 def convert_tensor_getitem(ctx: ConversionContext):

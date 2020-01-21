@@ -40,7 +40,7 @@ class Conv1D(nn.Module):
 
     def forward(self, x):
         nx = self.weight.shape[0]
-        assert x.size(-1) == nx
+        # assert x.size(-1) == nx
         size_out = x.size()[:-1] + (self.nf,)
         x = torch.addmm(self.bias, x.view(-1, nx), self.weight)
         x = x.view(size_out[0], -1, self.nf)
