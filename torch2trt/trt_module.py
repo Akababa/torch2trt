@@ -103,7 +103,6 @@ class TRTModule(torch.nn.Module):
             if not self.engine.binding_is_input(idx) and \
                     self.engine.is_execution_binding(idx):
                 name = self.engine.get_binding_name(idx)
-                validate_shape(input_dict[name].shape, self.engine.get_profile_shape(optimization_profile, idx))
                 dtype = torch_dtype_from_trt(self.engine.get_binding_dtype(idx))
                 device = torch_device_from_trt(self.engine.get_location(idx))
                 shape = tuple(self.context.get_binding_shape(idx))  # Infer output shape using TRT
