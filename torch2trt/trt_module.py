@@ -5,27 +5,12 @@ import torch
 from .conversion_utils import *
 
 
-def trt_num_inputs(engine):
-    count = 0
-    for i in range(engine.num_bindings):
-        if engine.binding_is_input(i):
-            count += 1
-    return count
-
-
-def trt_num_outputs(engine):
-    count = 0
-    for i in range(engine.num_bindings):
-        if not engine.binding_is_input(i):
-            count += 1
-    return count
-
-
 class TRTModule(torch.nn.Module):
     def __init__(self, engine: trt.ICudaEngine = None, input_names=None, output_names=None, debug_sync=False):
         super(TRTModule, self).__init__()
         self._register_state_dict_hook(TRTModule._on_state_dict)
         self.engine = engine
+        self.debug_sync = debug_sync
         if self.engine is not None:
             self.context = self.engine.create_execution_context()
             self.context.debug_sync = debug_sync
@@ -34,7 +19,7 @@ class TRTModule(torch.nn.Module):
         self.input_names = input_names
         self.output_names = output_names
         self.bindings = [None] * self.engine.num_bindings
-        self.exec_async = False
+        self.exec_async = True  # slightly faster for some reason
 
     def _on_state_dict(self, state_dict, prefix, local_metadata):
         state_dict[prefix + 'engine'] = bytearray(self.engine.serialize())
@@ -48,6 +33,7 @@ class TRTModule(torch.nn.Module):
         with trt.Logger() as logger, trt.Runtime(logger) as runtime:
             self.engine = runtime.deserialize_cuda_engine(engine_bytes)
             self.context = self.engine.create_execution_context()
+            self.context.debug_sync = self.debug_sync
 
         self.input_names = state_dict[prefix + 'input_names']
         self.output_names = state_dict[prefix + 'output_names']
@@ -121,3 +107,19 @@ class TRTModule(torch.nn.Module):
     def enable_profiling(self):
         if not self.context.profiler:
             self.context.profiler = trt.Profiler()
+
+
+def trt_num_inputs(engine):
+    count = 0
+    for i in range(engine.num_bindings):
+        if engine.binding_is_input(i):
+            count += 1
+    return count
+
+
+def trt_num_outputs(engine):
+    count = 0
+    for i in range(engine.num_bindings):
+        if not engine.binding_is_input(i):
+            count += 1
+    return count

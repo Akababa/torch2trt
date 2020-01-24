@@ -142,9 +142,9 @@ class Block(nn.Module):
         self.ln_2 = nn.LayerNorm(n_embd, eps=config.layer_norm_epsilon)
         self.mlp = MLP(4 * n_embd, config)
 
-    def forward(self, x, layer_past=None):
+    def forward(self, x, layer_past):
         ln1_x = self.ln_1(x)
-        a, present = self.attn(ln1_x, layer_past=layer_past)
+        a, present = self.attn(ln1_x, layer_past)
         x = x + a
         x += self.mlp(self.ln_2(x))  # residual
 
@@ -206,8 +206,8 @@ class GPT2Model(GPT2PreTrainedModel):
         # input_ids = input_ids.to(self.device) # do this before
         # past = past.to(self.device)
         batch_size, input_len = input_ids.size()
-        past = past.permute((2, 1, 0, 3, 4, 5))
         past_length = past.size(-2)
+        past = past.permute((2, 1, 0, 3, 4, 5))
 
         position_embeds = self.wpe.weight.data[past_length:past_length + input_len].unsqueeze(0)  # put in the batch
 

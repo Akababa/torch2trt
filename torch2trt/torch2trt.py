@@ -65,7 +65,7 @@ def torch2trt(module,
         config.int8_calibrator = DatasetCalibrator(inputs, int8_calib_dataset, batch_size=1,
                                                    algorithm=int8_calib_algorithm)
 
-    builder.max_batch_size = max_batch_size
+    # builder.max_batch_size = max_batch_size # Can't set builder properties!!!!!
 
     # Build network
 
