@@ -4,6 +4,7 @@ import tensorrt as trt
 from .trt_module import TRTModule
 from .calibration import TensorBatchDataset, DatasetCalibrator, DEFAULT_CALIBRATION_ALGORITHM
 from .conversion_context import ConversionContext
+from .conversion_utils import validate_shape
 
 
 def torch2trt(module,
@@ -35,9 +36,7 @@ def torch2trt(module,
     if optimization_profile is not None:
         profile = builder.create_optimization_profile()
         for name, shapelims, inp_shape in zip(input_names, optimization_profile, input_shapes):
-            mins, opts, maxs = np.array(shapelims)
-            assert all(mins <= opts) and all(opts <= maxs)
-            assert all(mins <= inp_shape) and all(inp_shape <= maxs)
+            validate_shape(inp_shape, shapelims)
             profile.set_shape(name, min=shapelims[0], opt=shapelims[1], max=shapelims[2])
             for d, (mind, maxd) in enumerate(zip(shapelims[0], shapelims[2])):
                 if mind != maxd:

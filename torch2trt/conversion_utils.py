@@ -1,3 +1,5 @@
+import numpy as np
+
 import tensorrt as trt
 import torch
 import functools
@@ -72,3 +74,10 @@ def torch_device_from_trt(device):
         return torch.device('cpu')
     else:
         return TypeError('%s is not supported by torch' % device)
+
+
+def validate_shape(shape, minoptmax):
+    mins, opts, maxs = np.array(minoptmax)
+    shape = np.array(shape)
+    assert all(mins <= opts) and all(opts <= maxs)
+    assert all(mins <= shape) and all(shape <= maxs)

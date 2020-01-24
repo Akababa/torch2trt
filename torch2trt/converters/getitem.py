@@ -34,7 +34,7 @@ def gather_one(ctx, input_trt, idx, axis):
     return ctx.network.add_gather(input_trt, idx_trt, axis).get_output(0)
 
 
-USE_GATHER = False
+USE_GATHER = False  # Gathering is slower
 
 
 # TODO gather for list and individual indices
