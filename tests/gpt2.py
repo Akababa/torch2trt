@@ -85,7 +85,7 @@ class Attention(nn.Module):
 
     def merge_heads(self, x: torch.Tensor):
         x = x.permute(1, 0, 2).contiguous()
-        new_x_shape = x.size()[:-2] + (-1,)  # (x.size(-2) * x.size(-1),)
+        new_x_shape = x.size()[:-2] + (self.n_embd,)
         return x.view(*new_x_shape)  # in Tensorflow implem: fct merge_states
 
     def split_heads(self, x, k=False):

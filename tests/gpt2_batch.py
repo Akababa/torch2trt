@@ -1,5 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-
+from collections import namedtuple
 import logging
 import math
 import os
@@ -19,6 +19,7 @@ GPT2_PRETRAINED_MODEL_ARCHIVE_MAP = {
     "gpt2-large": "https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-large-pytorch_model.bin",
     "gpt2-xl": "https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-xl-pytorch_model.bin",
     "distilgpt2": "https://s3.amazonaws.com/models.huggingface.co/bert/distilgpt2-pytorch_model.bin", }
+DynamicSizes = namedtuple("DynamicSizes", "batch input_ids past")
 
 
 # TODO use BERT plugins .cu once i get this working..
@@ -38,14 +39,14 @@ class Conv1D(nn.Module):
         self.weight = nn.Parameter(w)
         self.bias = nn.Parameter(torch.zeros(nf))
 
-    def forward(self, x, batch_size=None):
+    def forward(self, x, input_sizes=None):
         nx = self.weight.shape[0]
         # assert x.size(-1) == nx
-        if batch_size is None:
-            batch_size = x.size(0)
-        # size_out = x.size()[:-1] + (self.nf,)
-        x = torch.addmm(self.bias, x.view(-1, nx), self.weight)
-        x = x.view(batch_size, -1, self.nf)
+        if input_sizes is None:
+            input_sizes = DynamicSizes(*x.size()[:2], -1)
+
+        x = torch.addmm(self.bias, x.view(input_sizes.batch * input_sizes.input_ids, nx), self.weight)
+        x = x.view(input_sizes.batch, input_sizes.input_ids, self.nf)
         return x
 
 
@@ -70,11 +71,11 @@ class Attention(nn.Module):
         # self.pruned_heads = set()
         self._bias = None
 
-    def _attn(self, q, k, v):
+    def _attn(self, q, k, v, input_sizes):
         w = torch.matmul(q, k)
         if self.scale:
-            w /= math.sqrt(v.size(-1))
-        nd, ns = w.size(-2), w.size(-1)
+            w /= math.sqrt(self.n_embd // self.n_head)
+        nd, ns = input_sizes.input_ids, input_sizes.input_ids + input_sizes.past
         if self._bias is None:
             self._bias = self.bias.view(*self.bias.shape[2:])
         b = self._bias[None, None, ns - nd:ns, :ns]
@@ -85,27 +86,27 @@ class Attention(nn.Module):
 
         return torch.matmul(w, v)
 
-    def merge_heads(self, x: torch.Tensor):
+    def merge_heads(self, x: torch.Tensor, input_sizes):
         x = x.permute(0, 2, 1, 3).contiguous()
-        new_x_shape = x.size()[:-2] + (-1,)  # (x.size(-2) * x.size(-1),)
+        new_x_shape = (input_sizes.batch, input_sizes.input_ids, self.n_embd,)  # (x.size(-2) * x.size(-1),)
         return x.view(*new_x_shape)  # in Tensorflow implem: fct merge_states
 
-    def split_heads(self, x, k=False):
-        new_x_shape = x.size()[:-1] + (self.n_head, self.n_embd // self.n_head)  # x.size(-1) // self.n_head)
+    def split_heads(self, x, input_sizes, k=False):
+        new_x_shape = (input_sizes.batch, input_sizes.input_ids, self.n_head, self.n_embd // self.n_head)
         x = x.view(*new_x_shape)  # in Tensorflow implem: fct split_states
         if k:
             return x.permute(0, 2, 3, 1)  # (batch, head, head_features, seq_length)
         else:
             return x.permute(0, 2, 1, 3)  # (batch, head, seq_length, head_features)
 
-    def forward(self, x, layer_past, batch_size=None):
-        x = self.c_attn(x, batch_size=batch_size)
-        x = x.view(*(x.size()[:-1] + (3, self.n_embd)))
+    def forward(self, x, layer_past, input_sizes=None):
+        x = self.c_attn(x, input_sizes=input_sizes)
+        x = x.view(input_sizes.batch, input_sizes.input_ids, 3, self.n_embd)
         query, key, value = x[:, :, 0], x[:, :, 1], x[:, :, 2]
         # query, key, value = x.split(self.split_size, dim=2)
-        query = self.split_heads(query)
-        key = self.split_heads(key, k=True)
-        value = self.split_heads(value)
+        query = self.split_heads(query, input_sizes)
+        key = self.split_heads(key, input_sizes, k=True)
+        value = self.split_heads(value, input_sizes)
 
         past_key = layer_past[0].transpose(-2, -1)
         past_value = layer_past[1]  # transpose back cf below
@@ -114,10 +115,10 @@ class Attention(nn.Module):
 
         present = torch.stack((key.transpose(-2, -1), value))  # transpose to have same shapes for stacking
 
-        a = self._attn(query, key, value)
+        a = self._attn(query, key, value, input_sizes)
 
-        a = self.merge_heads(a)
-        a = self.c_proj(a, batch_size=batch_size)
+        a = self.merge_heads(a, input_sizes)
+        a = self.c_proj(a, input_sizes=input_sizes)
         a = self.resid_dropout(a)
 
         return a, present
@@ -132,9 +133,9 @@ class MLP(nn.Module):
         self.act = gelu
         self.dropout = nn.Dropout(config.resid_pdrop)
 
-    def forward(self, x):
-        h = self.act(self.c_fc(x))
-        h2 = self.c_proj(h)
+    def forward(self, x, input_sizes=None):
+        h = self.act(self.c_fc(x, input_sizes=input_sizes))
+        h2 = self.c_proj(h, input_sizes=input_sizes)
         return self.dropout(h2)
 
 
@@ -147,11 +148,10 @@ class Block(nn.Module):
         self.ln_2 = nn.LayerNorm(n_embd, eps=config.layer_norm_epsilon)
         self.mlp = MLP(4 * n_embd, config)
 
-    def forward(self, x, layer_past, batch_size=None):
-        ln1_x = self.ln_1(x)
-        a, present = self.attn(ln1_x, layer_past, batch_size=batch_size)
+    def forward(self, x, layer_past, input_sizes=None):
+        a, present = self.attn(self.ln_1(x), layer_past, input_sizes=input_sizes)
         x = x + a
-        x += self.mlp(self.ln_2(x))  # residual
+        x += self.mlp(self.ln_2(x), input_sizes=input_sizes)  # residual
 
         return x, present  # x, present
         # return outputs  # x, present, (attentions)
@@ -212,6 +212,7 @@ class GPT2Model(GPT2PreTrainedModel):
         # past = past.to(self.device)
         batch_size, input_len = input_ids.size()
         past_length = past.size(-2)
+        ds = DynamicSizes(batch_size, input_len, past_length)
         past = past.permute((2, 1, 0, 3, 4, 5))
 
         position_embeds = self.wpe.weight.data[past_length:past_length + input_len].unsqueeze(0)  # put in the batch
@@ -224,7 +225,7 @@ class GPT2Model(GPT2PreTrainedModel):
         for i in range(self.config.n_layer):
             layer_past = past[i]
             trans_block = self.h[i]
-            hidden_states, present = trans_block(hidden_states, layer_past=layer_past, batch_size=batch_size)
+            hidden_states, present = trans_block(hidden_states, layer_past=layer_past, input_sizes=ds)
             presents.append(present)
 
         hidden_states = self.ln_f(hidden_states)

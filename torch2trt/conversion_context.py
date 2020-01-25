@@ -108,7 +108,14 @@ class ConversionContext(object):
             slice_layer.set_input(1, self.make_shape_tensor(starts))
             assert slice_layer.get_input(1).shape.__len__() >= 0
 
-        return slice_layer.get_output(0)
+        output = slice_layer.get_output(0)
+        hint_shape = [x if isinstance(x, int) else 0 for x in sizes]
+        if nb_inputs >= 3 and len(set(hint_shape) - {0}) > 0:  # Give a shape hint to TRT
+            print(f"hinting shape {tuple(hint_shape)}")
+            shuffle_layer = self.network.add_shuffle(output)
+            shuffle_layer.reshape_dims = hint_shape
+            output = shuffle_layer.get_output(0)
+        return output
 
     def get_dim_of_shape(self, trt_shape: trt.ITensor, trt_dim: int) -> trt.ITensor:
         trt_dyn_shape_dim = self.network.add_slice(trt_shape, (trt_dim,), (1,), (1,)).get_output(0)
