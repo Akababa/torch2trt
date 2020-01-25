@@ -36,7 +36,10 @@ def remove_dim(ctx, trt_tensor, old_dims: list):
 @tensorrt_converter('torch.Tensor.view')
 def convert_view(ctx: ConversionContext):
     input_trt = ctx.get_arg("self", pos=0, to_trt=True)
-    new_shape = ctx.method_args[1:]
+    new_shape = list(ctx.method_args[1:])
+    if len(new_shape) >= 1 and isinstance(new_shape[0], (tuple, list)):
+        assert len(new_shape) == 1
+        new_shape = new_shape[0]
     new_shape = tuple(nsi if isinstance(nsi, int)
                       else ctx.get_trt_one(nsi, return_int=True) for nsi in new_shape)
 

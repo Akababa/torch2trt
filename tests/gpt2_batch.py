@@ -38,12 +38,14 @@ class Conv1D(nn.Module):
         self.weight = nn.Parameter(w)
         self.bias = nn.Parameter(torch.zeros(nf))
 
-    def forward(self, x):
+    def forward(self, x, batch_size=None):
         nx = self.weight.shape[0]
         # assert x.size(-1) == nx
+        if batch_size is None:
+            batch_size = x.size(0)
         # size_out = x.size()[:-1] + (self.nf,)
         x = torch.addmm(self.bias, x.view(-1, nx), self.weight)
-        x = x.view(-1, self.nf)
+        x = x.view(batch_size, -1, self.nf)
         return x
 
 
@@ -74,8 +76,8 @@ class Attention(nn.Module):
             w /= math.sqrt(v.size(-1))
         nd, ns = w.size(-2), w.size(-1)
         if self._bias is None:
-            self._bias = self.bias.view(*self.bias.shape[-2:])
-        b = self._bias[None, ns - nd:ns, :ns]
+            self._bias = self.bias.view(*self.bias.shape[2:])
+        b = self._bias[None, None, ns - nd:ns, :ns]
         w = w * b - 1e4 * (1.0 - b)
 
         w = nn.Softmax(dim=-1)(w)
@@ -84,7 +86,7 @@ class Attention(nn.Module):
         return torch.matmul(w, v)
 
     def merge_heads(self, x: torch.Tensor):
-        x = x.permute(1, 0, 2).contiguous()
+        x = x.permute(0, 2, 1, 3).contiguous()
         new_x_shape = x.size()[:-2] + (-1,)  # (x.size(-2) * x.size(-1),)
         return x.view(*new_x_shape)  # in Tensorflow implem: fct merge_states
 
@@ -92,14 +94,14 @@ class Attention(nn.Module):
         new_x_shape = x.size()[:-1] + (self.n_head, self.n_embd // self.n_head)  # x.size(-1) // self.n_head)
         x = x.view(*new_x_shape)  # in Tensorflow implem: fct split_states
         if k:
-            return x.permute(1, 2, 0)  # (batch, head, head_features, seq_length)
+            return x.permute(0, 2, 3, 1)  # (batch, head, head_features, seq_length)
         else:
-            return x.permute(1, 0, 2)  # (batch, head, seq_length, head_features)
+            return x.permute(0, 2, 1, 3)  # (batch, head, seq_length, head_features)
 
-    def forward(self, x, layer_past):
-        x = self.c_attn(x)
-        x = x.view((x.size(0), 3, self.n_embd))
-        query, key, value = x[:, 0], x[:, 1], x[:, 2]
+    def forward(self, x, layer_past, batch_size=None):
+        x = self.c_attn(x, batch_size=batch_size)
+        x = x.view(*(x.size()[:-1] + (3, self.n_embd)))
+        query, key, value = x[:, :, 0], x[:, :, 1], x[:, :, 2]
         # query, key, value = x.split(self.split_size, dim=2)
         query = self.split_heads(query)
         key = self.split_heads(key, k=True)
@@ -115,7 +117,7 @@ class Attention(nn.Module):
         a = self._attn(query, key, value)
 
         a = self.merge_heads(a)
-        a = self.c_proj(a)
+        a = self.c_proj(a, batch_size=batch_size)
         a = self.resid_dropout(a)
 
         return a, present
@@ -145,9 +147,9 @@ class Block(nn.Module):
         self.ln_2 = nn.LayerNorm(n_embd, eps=config.layer_norm_epsilon)
         self.mlp = MLP(4 * n_embd, config)
 
-    def forward(self, x, layer_past):
+    def forward(self, x, layer_past, batch_size=None):
         ln1_x = self.ln_1(x)
-        a, present = self.attn(ln1_x, layer_past)
+        a, present = self.attn(ln1_x, layer_past, batch_size=batch_size)
         x = x + a
         x += self.mlp(self.ln_2(x))  # residual
 
@@ -208,11 +210,11 @@ class GPT2Model(GPT2PreTrainedModel):
 
         # input_ids = input_ids.to(self.device) # do this before
         # past = past.to(self.device)
-        input_len = input_ids.size(0)
+        batch_size, input_len = input_ids.size()
         past_length = past.size(-2)
-        past = past.transpose(1, 0)  # permute((1, 0, 2, 3, 4))
+        past = past.permute((2, 1, 0, 3, 4, 5))
 
-        position_embeds = self.wpe.weight.data[past_length:past_length + input_len]
+        position_embeds = self.wpe.weight.data[past_length:past_length + input_len].unsqueeze(0)  # put in the batch
 
         inputs_embeds = self.wte(input_ids)
         hidden_states = inputs_embeds + position_embeds
@@ -222,7 +224,7 @@ class GPT2Model(GPT2PreTrainedModel):
         for i in range(self.config.n_layer):
             layer_past = past[i]
             trans_block = self.h[i]
-            hidden_states, present = trans_block(hidden_states, layer_past=layer_past)
+            hidden_states, present = trans_block(hidden_states, layer_past=layer_past, batch_size=batch_size)
             presents.append(present)
 
         hidden_states = self.ln_f(hidden_states)
