@@ -375,7 +375,7 @@ def _attach_converter(ctx: ConversionContext, method, converter, method_str):
                 elif isinstance(t, (int, float)):
                     return f"{type(t).__name__}({t})"
                 elif isinstance(t, (list, tuple)):
-                    return f"{type(t).__name__}[{stringer(t[0]) if len(t) > 0 else 'EMPTY'}]"
+                    return f"{type(t).__name__}[{','.join(map(stringer, t))}]"
                 else:
                     return type(t).__name__
 

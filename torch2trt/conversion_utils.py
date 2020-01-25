@@ -13,7 +13,7 @@ def __get_output_v2(*args, **kwargs):
     # allargs = tuple(args) + tuple(kwargs.values())
     # print(allargs)
     output = get_output_old(*args, **kwargs)
-    print(f"  Added {args[0].__class__.__name__}: got output shape {output.shape}, dtype {output.dtype}")
+    print(f"+ \"{output.name}\" with shape {output.shape}, dtype {output.dtype}")
     assert output.shape.__len__() >= 0, "Invalid ILayer inputs"
     return output
 

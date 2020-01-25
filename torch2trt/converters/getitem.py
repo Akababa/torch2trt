@@ -1,6 +1,6 @@
 from ..conversion_context import *
 from torch2trt.module_test import add_module_test
-from .view import remove_dim
+from .view import remove_dim, insert_dim
 
 
 def slice_to_trt(ctx, dim_size, dim_slice):
@@ -52,7 +52,7 @@ def convert_tensor_getitem(ctx: ConversionContext):
     ndims = len(input_trt.shape)
 
     # Step 1 - Replace ellipsis with expanded slices
-    num_ellipsis = ndims - len(slices)  # num_slice_types(slices)
+    num_ellipsis = ndims - len([s for s in slices if s != Ellipsis])
 
     def to_trt_keeping_constant(t):
         if isinstance(t, int) or t is None:
@@ -63,6 +63,7 @@ def convert_tensor_getitem(ctx: ConversionContext):
             raise ValueError
 
     # standardize slices
+    inserted_axes = []
     new_slices = []
     for s in slices:
         if s == Ellipsis:
@@ -75,6 +76,8 @@ def convert_tensor_getitem(ctx: ConversionContext):
             new_slices.append(s)
         elif isinstance(s, torch.Tensor):
             new_slices.append(ctx.get_trt_one(s))
+        elif s is None:
+            inserted_axes.append(len(new_slices))
         else:
             raise ValueError(f"unsupported type {type(s)} in __getitem__")
 
@@ -123,9 +126,15 @@ def convert_tensor_getitem(ctx: ConversionContext):
     else:
         output_trt = input_trt
 
+    if len(removed_axes) > 0:
+        output_trt = remove_dim(ctx, output_trt, removed_axes)
+
+    if len(inserted_axes) > 0:
+        output_trt = insert_dim(ctx, output_trt, inserted_axes)
+
     # Step 4 - remove int axes
     output = ctx.method_return
-    output._trt = output_trt if removed_axes == [] else remove_dim(ctx, output_trt, removed_axes)
+    output._trt = output_trt
 
 
 class LambdaModule(torch.nn.Module):

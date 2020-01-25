@@ -38,12 +38,14 @@ class Conv1D(nn.Module):
         self.weight = nn.Parameter(w)
         self.bias = nn.Parameter(torch.zeros(nf))
 
-    def forward(self, x):
+    def forward(self, x, batch_size=None):
         nx = self.weight.shape[0]
         # assert x.size(-1) == nx
-        size_out = x.size()[:-1] + (self.nf,)
+        if batch_size is None:
+            batch_size = x.size(0)
+        # size_out = x.size()[:-1] + (self.nf,)
         x = torch.addmm(self.bias, x.view(-1, nx), self.weight)
-        x = x.view(size_out[0], -1, self.nf)
+        x = x.view(batch_size, -1, self.nf)
         return x
 
 
@@ -66,13 +68,16 @@ class Attention(nn.Module):
         self.attn_dropout = nn.Dropout(config.attn_pdrop)
         self.resid_dropout = nn.Dropout(config.resid_pdrop)
         # self.pruned_heads = set()
+        self._bias = None
 
     def _attn(self, q, k, v):
         w = torch.matmul(q, k)
         if self.scale:
             w /= math.sqrt(v.size(-1))
         nd, ns = w.size(-2), w.size(-1)
-        b = self.bias[:, :, ns - nd:ns, :ns]
+        if self._bias is None:
+            self._bias = self.bias.view(*self.bias.shape[2:])
+        b = self._bias[None, None, ns - nd:ns, :ns]
         w = w * b - 1e4 * (1.0 - b)
 
         w = nn.Softmax(dim=-1)(w)
@@ -93,8 +98,8 @@ class Attention(nn.Module):
         else:
             return x.permute(0, 2, 1, 3)  # (batch, head, seq_length, head_features)
 
-    def forward(self, x, layer_past):
-        x = self.c_attn(x)
+    def forward(self, x, layer_past, batch_size=None):
+        x = self.c_attn(x, batch_size=batch_size)
         x = x.view(*(x.size()[:-1] + (3, self.n_embd)))
         query, key, value = x[:, :, 0], x[:, :, 1], x[:, :, 2]
         # query, key, value = x.split(self.split_size, dim=2)
@@ -112,7 +117,7 @@ class Attention(nn.Module):
         a = self._attn(query, key, value)
 
         a = self.merge_heads(a)
-        a = self.c_proj(a)
+        a = self.c_proj(a, batch_size=batch_size)
         a = self.resid_dropout(a)
 
         return a, present
@@ -142,9 +147,9 @@ class Block(nn.Module):
         self.ln_2 = nn.LayerNorm(n_embd, eps=config.layer_norm_epsilon)
         self.mlp = MLP(4 * n_embd, config)
 
-    def forward(self, x, layer_past):
+    def forward(self, x, layer_past, batch_size=None):
         ln1_x = self.ln_1(x)
-        a, present = self.attn(ln1_x, layer_past)
+        a, present = self.attn(ln1_x, layer_past, batch_size=batch_size)
         x = x + a
         x += self.mlp(self.ln_2(x))  # residual
 
@@ -219,7 +224,7 @@ class GPT2Model(GPT2PreTrainedModel):
         for i in range(self.config.n_layer):
             layer_past = past[i]
             trans_block = self.h[i]
-            hidden_states, present = trans_block(hidden_states, layer_past=layer_past)
+            hidden_states, present = trans_block(hidden_states, layer_past=layer_past, batch_size=batch_size)
             presents.append(present)
 
         hidden_states = self.ln_f(hidden_states)

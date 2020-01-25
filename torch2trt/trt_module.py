@@ -71,7 +71,8 @@ class TRTModule(torch.nn.Module):
 
     # After calling this once, only set_input_bindings is needed on forward passes
     def reset_bindings(self, input_dict, optimization_profile=0):  # -> List[Optional[torch.Tensor]]:
-        self.context.active_optimization_profile = optimization_profile
+        if self.context.active_optimization_profile != optimization_profile:
+            self.context.active_optimization_profile = optimization_profile
         if isinstance(input_dict, (list, tuple)):
             input_dict = {k: v for k, v in zip(self.input_names, input_dict)}
         self.bindings = [None] * self.engine.num_bindings

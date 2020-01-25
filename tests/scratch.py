@@ -11,7 +11,7 @@ import gpt2
 torch.manual_seed(0)
 
 past_dummy_seq_length = 7
-input_dummy_seq_length = 9
+input_dummy_seq_length = 11
 ex_batch_size = 5
 
 config = gpt2.GPT2Config()  # n_layer=2, n_head=2, n_embd=4, vocab_size=10)
