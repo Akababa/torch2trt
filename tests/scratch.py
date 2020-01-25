@@ -4,8 +4,8 @@ import torch2trt
 import tensorrt as trt
 import numpy as np
 
-NO_BATCH = True
-if NO_BATCH:
+BATCH = True
+if not BATCH:
     import gpt2
 else:
     import gpt2_batch as gpt2
@@ -68,7 +68,7 @@ inputs = [torch.zeros(input_dummy_shape, dtype=torch.long if TEST[:4] == "gpt2" 
 model.to(device)
 model.to(dtype)
 
-if NO_BATCH:
+if not BATCH:
     inputs = [inp.squeeze(0) for inp in inputs]
     opt_profiles = [[op_[:, 1:] for op_ in op] for op in opt_profiles]
 

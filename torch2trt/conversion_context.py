@@ -382,7 +382,18 @@ def _attach_converter(ctx: ConversionContext, method, converter, method_str):
         if converter["is_real"]:
             def stringer(t):
                 if isinstance(t, torch.Tensor):
-                    return f"Tensor({tuple(t.shape)})"
+                    if hasattr(t, "_trt"):
+                        shap = []
+                        for ts, ttrts in zip(t.shape, t._trt.shape):
+                            if ts == ttrts:
+                                shap.append(str(ts))
+                            else:
+                                assert ttrts == -1
+                                shap.append(f"_{ts}")
+                    else:
+                        shap = [str(ts) for ts in t.shape]
+
+                    return "Tensor({})".format(",".join(shap))
                 elif isinstance(t, (int, float)):
                     return f"{type(t).__name__}({t})"
                 elif isinstance(t, (list, tuple)):

@@ -10,23 +10,26 @@ def slice_to_trt(ctx, dim_size, dim_slice):
     assert isinstance(stride, int), "dynamic stride not supported"
     assert all(isinstance(s, (int, trt.ITensor)) for s in (start, stop, stride))
 
-    if isinstance(stop, trt.ITensor):
+    if dim_slice.stop is None and isinstance(start, int) and start < 0:
+        if isinstance(stride, int):
+            size = (-start - 1) // stride + 1
+        else:
+            raise ValueError
+    elif isinstance(stop, trt.ITensor):
         assert stride == 1, "only stride=1 supported with dynamic slices"
         if start == 0:
-            size_before_stride = stop
+            size = stop
         else:
-            size_before_stride = ctx.network.add_elementwise(
+            size = ctx.network.add_elementwise(
                 stop, ctx.get_trt_one(start), trt.ElementWiseOperation.SUB).get_output(0)
-        return start, size_before_stride, stride
     elif isinstance(start, trt.ITensor):
         assert stride == 1
-        size_before_stride = ctx.network.add_elementwise(
+        size = ctx.network.add_elementwise(
             ctx.get_trt_one(stop), start, trt.ElementWiseOperation.SUB).get_output(0)
-        return start, size_before_stride, stride
     else:
         assert all(isinstance(s, int) for s in (start, stop, stride))
         size = (stop - start - 1) // stride + 1
-        return start, size, stride
+    return start, size, stride
 
 
 def gather_one(ctx, input_trt, idx, axis):
@@ -39,7 +42,7 @@ USE_GATHER = False  # Gathering is slower
 
 # TODO gather for list and individual indices
 # TODO but gather is slower!! TEST and revert this back to slice
-# THIS DOES NOT ASSUME IMPLICIT BATCH DIM, UNLIKE EVERY OTHER CONVERTER
+# TODO negative dim shape
 @tensorrt_converter('torch.Tensor.__getitem__')
 def convert_tensor_getitem(ctx: ConversionContext):
     input_trt = ctx.get_trt_one(ctx.method_args[0])
