@@ -63,6 +63,8 @@ class TRTModule(torch.nn.Module):
                 # print(f"Setting execution binding {name}, {idx}")
                 if self.engine.binding_is_input(idx):
                     name = self.engine.get_binding_name(idx)
+                    # validate_shape(input_dict[name].shape,
+                    #                self.engine.get_profile_shape(self.context.active_optimization_profile, idx)) # slow
                     self.bindings[idx] = input_dict[name]
 
         # assert self.context.all_binding_shapes_specified

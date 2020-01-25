@@ -10,7 +10,7 @@ from .conversion_utils import validate_shape
 def torch2trt(module,
               inputs,
               input_names=None,
-              optimization_profile=None,  # Required for dynamic input shapes
+              optimization_profiles=None,  # Required for dynamic input shapes
               output_names=None,
               log_level=trt.Logger.WARNING,
               max_batch_size=1,
@@ -33,15 +33,16 @@ def torch2trt(module,
     # Infer input shapes (dynamic) and make optimization profile
     input_shapes = [list(inp.shape) for inp in inputs]
     config = builder.create_builder_config()
-    if optimization_profile is not None:
-        profile = builder.create_optimization_profile()
-        for name, shapelims, inp_shape in zip(input_names, optimization_profile, input_shapes):
-            validate_shape(inp_shape, shapelims)
-            profile.set_shape(name, min=shapelims[0], opt=shapelims[1], max=shapelims[2])
-            for d, (mind, maxd) in enumerate(zip(shapelims[0], shapelims[2])):
-                if mind != maxd:
-                    inp_shape[d] = -1
-        config.add_optimization_profile(profile)
+    if optimization_profiles is not None:
+        for optimization_profile in optimization_profiles:
+            profile = builder.create_optimization_profile()
+            for name, shapelims, inp_shape in zip(input_names, optimization_profile, input_shapes):
+                validate_shape(inp_shape, shapelims)
+                profile.set_shape(name, min=shapelims[0], opt=shapelims[1], max=shapelims[2])
+                for d, (mind, maxd) in enumerate(zip(shapelims[0], shapelims[2])):
+                    if mind != maxd:
+                        inp_shape[d] = -1
+            config.add_optimization_profile(profile)
 
     # Set config properties
     config.max_workspace_size = max_workspace_size
