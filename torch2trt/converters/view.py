@@ -38,7 +38,7 @@ def convert_view(ctx: ConversionContext):
     input_trt = ctx.get_arg("self", pos=0, to_trt=True)
     new_shape = ctx.method_args[1:]
     new_shape = tuple(nsi if isinstance(nsi, int)
-                      else ctx.get_trt_one(nsi) for nsi in new_shape)
+                      else ctx.get_trt_one(nsi, return_int=True) for nsi in new_shape)
 
     output = ctx.method_return
     output._trt = ctx.reshape_to(input_trt, new_shape)

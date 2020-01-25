@@ -124,12 +124,14 @@ class ConversionContext(object):
         return t_1
 
     # TODO implicit type conversion
-    def get_trt_one(self, t: Union[torch.Tensor, float, int]) -> trt.ITensor:
+    def get_trt_one(self, t: Union[torch.Tensor, float, int], return_int=False) -> trt.ITensor:
         if isinstance(t, trt.ITensor):
             return t
         # GET TRT TENSOR (OR CREATE TRT CONSTANT)
         # get tensor w/ _trt
         elif isinstance(t, torch.Tensor) and hasattr(t, '_trt'):
+            if return_int and t.shape == () and not t.is_floating_point() and "[Constant]_output" in t._trt.name:
+                return int(t)
             trt_tensor = t._trt
             shape_ok(t)
         # or... add constant for leaf tensor w/o _trt

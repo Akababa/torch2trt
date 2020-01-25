@@ -6,6 +6,7 @@ import numpy as np
 
 class ILayer:
     def __init__(self):
+        self.name = ""
         self.opname = ""
         self.dtype = DataType.FLOAT
         self.inputs = []
@@ -160,7 +161,7 @@ class ILayer:
         iten.dtype = self.dtype
         iten.torch_value = self.torch_value
         iten.last_layer = self
-        iten.name = f"({self.name}) [{self.opname}]_output"
+        iten.name = f"({self.name}) [{self.opname[0].upper()}{self.opname[1:]}]_output"
 
         return iten
 

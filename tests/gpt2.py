@@ -58,14 +58,14 @@ class Attention(nn.Module):
         assert n_embd % config.n_head == 0
         self.register_buffer("bias", torch.tril(torch.ones(n_ctx, n_ctx)).view(1, 1, n_ctx, n_ctx))
         self.n_head = config.n_head
-        self.split_size = n_embd
+        self.n_embd = n_embd
         self.scale = scale
 
         self.c_attn = Conv1D(n_embd * 3, n_embd)
         self.c_proj = Conv1D(n_embd, n_embd)
         self.attn_dropout = nn.Dropout(config.attn_pdrop)
         self.resid_dropout = nn.Dropout(config.resid_pdrop)
-        self.pruned_heads = set()
+        # self.pruned_heads = set()
 
     def _attn(self, q, k, v):
         w = torch.matmul(q, k)
@@ -82,11 +82,11 @@ class Attention(nn.Module):
 
     def merge_heads(self, x: torch.Tensor):
         x = x.permute(0, 2, 1, 3).contiguous()
-        new_x_shape = x.size()[:-2] + (x.size(-2) * x.size(-1),)
+        new_x_shape = x.size()[:-2] + (-1,)  # (x.size(-2) * x.size(-1),)
         return x.view(*new_x_shape)  # in Tensorflow implem: fct merge_states
 
     def split_heads(self, x, k=False):
-        new_x_shape = x.size()[:-1] + (self.n_head, x.size(-1) // self.n_head)
+        new_x_shape = x.size()[:-1] + (self.n_head, self.n_embd // self.n_head)  # x.size(-1) // self.n_head)
         x = x.view(*new_x_shape)  # in Tensorflow implem: fct split_states
         if k:
             return x.permute(0, 2, 3, 1)  # (batch, head, head_features, seq_length)
@@ -95,7 +95,7 @@ class Attention(nn.Module):
 
     def forward(self, x, layer_past):
         x = self.c_attn(x)
-        x = x.view(*(x.size()[:-1] + (3, self.split_size)))
+        x = x.view(*(x.size()[:-1] + (3, self.n_embd)))
         query, key, value = x[:, :, 0], x[:, :, 1], x[:, :, 2]
         # query, key, value = x.split(self.split_size, dim=2)
         query = self.split_heads(query)
