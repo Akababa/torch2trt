@@ -184,7 +184,7 @@ class INetworkDefinition:
     def mark_output(self, trt_tensor):
         pass
 
-    def __getattr__(self, name):
+    def __getattr__(self, name) -> ILayer:
         if name[:4] == "add_":
             layer = make_add_layer_func(name[4:], self.num_layers)
             self.num_layers += 1

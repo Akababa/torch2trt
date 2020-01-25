@@ -11,7 +11,9 @@ def _matmul(ctx, mat1_trt, mat2_trt):
     else:
         assert len(mat1_trt.shape) == len(mat2_trt.shape)
 
+    assert mat1_trt.dtype == mat2_trt.dtype
     m1m2_trt = ctx.network.add_matrix_multiply(mat1_trt, op1, mat2_trt, op2).get_output(0)
+    m1m2_trt = ctx.convert_dtype_to(m1m2_trt, mat1_trt.dtype)
     return m1m2_trt
 
 
