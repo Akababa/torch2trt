@@ -82,19 +82,20 @@ class ConversionContext(object):
         nb_inputs = 1
         for i, ss in enumerate((starts, sizes, strides)):
             if not all(isinstance(si, int) for si in ss):
-                nb_inputs = i + 1
+                nb_inputs = i + 2
         # Create layer with possible dummy inputs to be overwritten
         slice_layer = self.network.add_slice(t,
-                                             starts if nb_inputs < 1 else (0,) * ndims,
-                                             sizes if nb_inputs < 2 else (1,) * ndims,
-                                             strides if nb_inputs < 3 else (1,) * ndims)
-        if nb_inputs >= 3:
+                                             starts if nb_inputs < 2 else (0,) * ndims,
+                                             sizes if nb_inputs < 3 else (1,) * ndims,
+                                             strides if nb_inputs < 4 else (1,) * ndims)
+        print(f"add_slice with {nb_inputs} inputs")
+        if nb_inputs >= 4:
             slice_layer.set_input(3, self.make_shape_tensor(strides))
             assert slice_layer.get_input(3).shape.__len__() >= 0, "Invalid stride input"
-        if nb_inputs >= 2:
+        if nb_inputs >= 3:
             slice_layer.set_input(2, self.make_shape_tensor(sizes))
             assert slice_layer.get_input(2).shape.__len__() >= 0
-        if nb_inputs >= 1:
+        if nb_inputs >= 2:
             slice_layer.set_input(1, self.make_shape_tensor(starts))
             assert slice_layer.get_input(1).shape.__len__() >= 0
 

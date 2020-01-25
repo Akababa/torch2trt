@@ -5,8 +5,6 @@ from torch2trt.module_test import add_module_test
 # ASSUME EXPLICIT BATCH MODE to make things easier for now
 def insert_dim(ctx, trt_tensor, new_dims: list):
     ndims = len(trt_tensor.shape)
-    # new_shape = list(trt_tensor.shape)
-    # new_shape.insert(new_dim, 1)
 
     # if new_shape.count(-1) > 1:
     layer = ctx.network.add_shuffle(trt_tensor)
@@ -18,8 +16,6 @@ def insert_dim(ctx, trt_tensor, new_dims: list):
         perm2.insert(newdim, idx2)
     layer.second_transpose = perm2
     return layer.get_output(0)
-    # else:
-    #     return ctx.reshape_to(trt_tensor, new_shape)
 
 
 def remove_dim(ctx, trt_tensor, old_dims: list):
