@@ -70,8 +70,17 @@ class ConversionContext(object):
     # TODO use this everywhere
     def make_shape_tensor(self, shape):
         # Makes a 1d shape trt tensor from a mixed tuple (of python ints and trt scalars)
-        trt_dims = [self.get_trt_one(t) for t in shape]
-        trt_dims = [self._shape0to1(t) for t in trt_dims]
+        mixed_dims = []
+        for s in shape:
+            if isinstance(s, int):
+                if len(mixed_dims) > 0 and isinstance(mixed_dims[-1], list):
+                    mixed_dims[-1].append(s)
+                else:
+                    mixed_dims.append([s])
+            else:
+                mixed_dims.append(self._shape0to1(self.get_trt_one(s)))
+        trt_dims = [self._add_const_trt(np.array(md, dtype=np.int32)) if isinstance(md, list)
+                    else md for md in mixed_dims]
         layer = self.network.add_concatenation(trt_dims)
         layer.axis = 0
         return layer.get_output(0)
@@ -190,9 +199,10 @@ class ConversionContext(object):
 
         return axes
 
-    def _add_const_trt(self, tensor: torch.Tensor):
+    def _add_const_trt(self, tensor: Union[torch.Tensor, np.ndarray]):
         shape = tuple(tensor.shape)
-        array = tensor.detach().cpu().numpy()
+        array = tensor.detach().cpu().numpy() if isinstance(tensor, torch.Tensor) else tensor
+        assert isinstance(array, np.ndarray)
         if array.dtype == np.int64:  # TRT doesn't support long
             # print(f"Warning: implicitly converting an array of shape {array.shape} from int64 to int32")
             array = array.astype(np.int32)
@@ -323,7 +333,8 @@ class ConversionHook(object):
 def shape_ok(t: torch.Tensor):
     assert isinstance(t, torch.Tensor)
     assert t._trt.shape.__len__() >= 0, "Bad trt ITensor output"
-    assert all(torch_d == trt_d or trt_d == -1 for torch_d, trt_d in
+    assert len(t.shape) == len(t._trt.shape) and \
+           all(torch_d == trt_d or trt_d == -1 for torch_d, trt_d in
                zip(t.shape, t._trt.shape))
 
 

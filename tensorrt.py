@@ -44,13 +44,13 @@ class ILayer:
             self.torch_value = self.inputs[0].shape
         elif self.opname in ("slice",):
             shape = self.inputs[2]
-            if shape == (1,):  # for slicing a shape tensor
+            if "[Shape]_output" in self.inputs[0].name:  # for slicing a shape tensor
                 myslices = [slice(st, st + si, 1 if stride == 0 else stride) for st, si, stride in
                             zip(*self.inputs[1:4])]
                 myslices = tuple(myslices) if len(myslices) > 1 else myslices[0]
                 self.torch_value = self.inputs[0].torch_value.__getitem__(myslices)
-            else:
-                shape = shape.torch_value
+            # else:
+            #     shape = shape.torch_value
         elif self.opname in ("shuffle",):
             shape = self.inputs[0].shape
             if hasattr(self, "first_transpose"):
@@ -102,7 +102,7 @@ class ILayer:
                 shape[self.axis] = -1
             else:
                 shape[self.axis] = sum(cataxis)
-            if self.axis == 0 and cats[0].shape == (1,):
+            if self.axis == 0 and len(cats[0].shape) == 1:
                 self.torch_value = np.concatenate([inp.torch_value for inp in cats], axis=self.axis)
         elif self.opname == "fully_connected":
             shape = list(self.inputs[0].shape)
@@ -186,8 +186,9 @@ class INetworkDefinition:
 
     def __getattr__(self, name):
         if name[:4] == "add_":
+            layer = make_add_layer_func(name[4:], self.num_layers)
             self.num_layers += 1
-            return make_add_layer_func(name[4:], self.num_layers)
+            return layer
 
 
 def make_add_layer_func(layer_name, i):

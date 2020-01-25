@@ -37,7 +37,10 @@ def torch2trt(module,
         for optimization_profile in optimization_profiles:
             profile = builder.create_optimization_profile()
             for name, shapelims, inp_shape in zip(input_names, optimization_profile, input_shapes):
-                validate_shape(inp_shape, shapelims)
+                try:
+                    validate_shape(inp_shape, shapelims)
+                except:
+                    print("warning: example input doesn't fit profile")
                 profile.set_shape(name, min=shapelims[0], opt=shapelims[1], max=shapelims[2])
                 for d, (mind, maxd) in enumerate(zip(shapelims[0], shapelims[2])):
                     if mind != maxd:

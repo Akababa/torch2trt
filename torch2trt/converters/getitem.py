@@ -52,7 +52,7 @@ def convert_tensor_getitem(ctx: ConversionContext):
     ndims = len(input_trt.shape)
 
     # Step 1 - Replace ellipsis with expanded slices
-    num_ellipsis = ndims - len([s for s in slices if s != Ellipsis])
+    num_ellipsis = ndims - len([s for s in slices if s not in [None, Ellipsis]])
 
     def to_trt_keeping_constant(t):
         if isinstance(t, int) or t is None:
