@@ -1,5 +1,5 @@
 from __future__ import absolute_import, division, print_function, unicode_literals
-
+from collections import namedtuple
 import logging
 import math
 import os
@@ -13,6 +13,7 @@ from transformers.modeling_utils import PreTrainedModel, prune_conv1d_layer
 
 logger = logging.getLogger(__name__)
 
+DynamicSizes = namedtuple("DynamicSizes", "batch input_ids past")
 GPT2_PRETRAINED_MODEL_ARCHIVE_MAP = {
     "gpt2": "https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-pytorch_model.bin",
     "gpt2-medium": "https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-medium-pytorch_model.bin",
@@ -38,10 +39,11 @@ class Conv1D(nn.Module):
         self.weight = nn.Parameter(w)
         self.bias = nn.Parameter(torch.zeros(nf))
 
-    def forward(self, x):
+    def forward(self, x, ds=None):
         nx = self.weight.shape[0]
+        if ds is None:
+            ds = DynamicSizes(None, x.size(-2), -1)
         # assert x.size(-1) == nx
-        # size_out = x.size()[:-1] + (self.nf,)
         x = torch.addmm(self.bias, x.view(-1, nx), self.weight)
         x = x.view(-1, self.nf)
         return x
@@ -145,9 +147,8 @@ class Block(nn.Module):
         self.ln_2 = nn.LayerNorm(n_embd, eps=config.layer_norm_epsilon)
         self.mlp = MLP(4 * n_embd, config)
 
-    def forward(self, x, layer_past):
-        ln1_x = self.ln_1(x)
-        a, present = self.attn(ln1_x, layer_past)
+    def forward(self, x, layer_past, ds=None):
+        a, present = self.attn(self.ln_1(x), layer_past, ds=ds)
         x = x + a
         x += self.mlp(self.ln_2(x))  # residual
 
@@ -210,6 +211,7 @@ class GPT2Model(GPT2PreTrainedModel):
         # past = past.to(self.device)
         input_len = input_ids.size(0)
         past_length = past.size(-2)
+        ds = DynamicSizes(-1, input_len, past_length)
         past = past.transpose(1, 0)  # permute((1, 0, 2, 3, 4))
 
         position_embeds = self.wpe.weight.data[past_length:past_length + input_len]
@@ -222,7 +224,7 @@ class GPT2Model(GPT2PreTrainedModel):
         for i in range(self.config.n_layer):
             layer_past = past[i]
             trans_block = self.h[i]
-            hidden_states, present = trans_block(hidden_states, layer_past=layer_past)
+            hidden_states, present = trans_block(hidden_states, layer_past=layer_past, ds=ds)
             presents.append(present)
 
         hidden_states = self.ln_f(hidden_states)

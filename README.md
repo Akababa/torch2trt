@@ -166,6 +166,22 @@ the following
 
 Please see [this folder](torch2trt/converters) for more examples.
 
+
+## Errors
+Check stderr for TRT error messages (they don't show up in Python). In colab, go to Runtime > View Runtime logs
+```
+[TensorRT] ERROR: ../builder/cudnnBuilderBlockChooser.cpp (127) - Assertion Error in buildMemGraph: 0 (mg.nodes[mg.regionIndices[outputRegion]].size == mg.nodes[mg.regionIndices[inputRegion]].size)
+```
+means you're using too many shuffles with hard indices (non 0 or -1) in the reshape_dims, so TRT is finding a conflict.
+
+```
+[TensorRT] ERROR: Internal error: could not find any implementation for node (Unnamed Layer* 622) [ElementWise], try increasing the workspace size with IBuilder::setMaxWorkspaceSize()
+```
+means you're using too many shuffles with soft (0 or -1) indices in the reshape_dims, so TRT has too long a chain of inferred dimensions.
+
+
+
+
 ## See also
 
 - [JetBot](http://github.com/NVIDIA-AI-IOT/jetbot) - An educational AI robot based on NVIDIA Jetson Nano

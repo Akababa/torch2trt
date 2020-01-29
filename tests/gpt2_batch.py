@@ -45,7 +45,7 @@ class Conv1D(nn.Module):
         if input_sizes is None:
             input_sizes = DynamicSizes(*x.size()[:2], -1)
 
-        x = torch.addmm(self.bias, x.view(input_sizes.batch * input_sizes.input_ids, nx), self.weight)
+        x = torch.addmm(self.bias, x.view(-1, nx), self.weight)
         x = x.view(input_sizes.batch, input_sizes.input_ids, self.nf)
         return x
 
@@ -71,11 +71,14 @@ class Attention(nn.Module):
         # self.pruned_heads = set()
         self._bias = None
 
-    def _attn(self, q, k, v, input_sizes):
+    def _attn(self, q, k, v, input_sizes=None):
         w = torch.matmul(q, k)
         if self.scale:
             w /= math.sqrt(self.n_embd // self.n_head)
-        nd, ns = input_sizes.input_ids, input_sizes.input_ids + input_sizes.past
+        if input_sizes is None:
+            nd, ns = w.size()[-2:]
+        else:
+            nd, ns = input_sizes.input_ids, input_sizes.input_ids + input_sizes.past
         if self._bias is None:
             self._bias = self.bias.view(*self.bias.shape[2:])
         b = self._bias[None, None, ns - nd:ns, :ns]
@@ -86,12 +89,16 @@ class Attention(nn.Module):
 
         return torch.matmul(w, v)
 
-    def merge_heads(self, x: torch.Tensor, input_sizes):
+    def merge_heads(self, x: torch.Tensor, input_sizes=None):
         x = x.permute(0, 2, 1, 3).contiguous()
-        new_x_shape = (input_sizes.batch, input_sizes.input_ids, self.n_embd,)  # (x.size(-2) * x.size(-1),)
+        if input_sizes is None:
+            input_sizes = DynamicSizes(x.size(0), x.size(1), None)
+        new_x_shape = (input_sizes.batch, input_sizes.input_ids, self.n_embd)
         return x.view(*new_x_shape)  # in Tensorflow implem: fct merge_states
 
-    def split_heads(self, x, input_sizes, k=False):
+    def split_heads(self, x, input_sizes=None, k=False):
+        if input_sizes is None:
+            input_sizes = DynamicSizes(*x.size()[:2], None)
         new_x_shape = (input_sizes.batch, input_sizes.input_ids, self.n_head, self.n_embd // self.n_head)
         x = x.view(*new_x_shape)  # in Tensorflow implem: fct split_states
         if k:
@@ -100,13 +107,13 @@ class Attention(nn.Module):
             return x.permute(0, 2, 1, 3)  # (batch, head, seq_length, head_features)
 
     def forward(self, x, layer_past, input_sizes=None):
-        x = self.c_attn(x, input_sizes=input_sizes)
-        x = x.view(input_sizes.batch, input_sizes.input_ids, 3, self.n_embd)
+        x = self.c_attn(x)
+        x = x.view(*x.size()[:2], 3, self.n_embd)
         query, key, value = x[:, :, 0], x[:, :, 1], x[:, :, 2]
         # query, key, value = x.split(self.split_size, dim=2)
-        query = self.split_heads(query, input_sizes)
-        key = self.split_heads(key, input_sizes, k=True)
-        value = self.split_heads(value, input_sizes)
+        query = self.split_heads(query)
+        key = self.split_heads(key, k=True)
+        value = self.split_heads(value)
 
         past_key = layer_past[0].transpose(-2, -1)
         past_value = layer_past[1]  # transpose back cf below
@@ -115,10 +122,10 @@ class Attention(nn.Module):
 
         present = torch.stack((key.transpose(-2, -1), value))  # transpose to have same shapes for stacking
 
-        a = self._attn(query, key, value, input_sizes)
+        a = self._attn(query, key, value)
 
-        a = self.merge_heads(a, input_sizes)
-        a = self.c_proj(a, input_sizes=input_sizes)
+        a = self.merge_heads(a)
+        a = self.c_proj(a)
         a = self.resid_dropout(a)
 
         return a, present

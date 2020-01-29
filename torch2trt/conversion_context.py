@@ -396,7 +396,7 @@ def _attach_converter(ctx: ConversionContext, method, converter, method_str):
                                 shap.append(str(ts))
                             else:
                                 assert ttrts == -1
-                                shap.append(f"_{ts}")
+                                shap.append(f"*{ts}")
                     else:
                         shap = [str(ts) for ts in t.shape]
 

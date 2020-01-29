@@ -15,9 +15,9 @@ else:
 
 torch.manual_seed(0)
 
-past_dummy_seq_length = 7
+past_dummy_seq_length = 71
 input_dummy_seq_length = 11
-ex_batch_size = 5
+ex_batch_size = 53
 
 config = gpt2.GPT2Config()  # n_layer=2, n_head=2, n_embd=4, vocab_size=10)
 dtype = torch.float32
@@ -54,7 +54,7 @@ opt_profile = [None, None]
 opt_profile[0] = np.array([input_dummy_shape] * 3)
 opt_profile[1] = np.array([past_dummy_shape] * 3)  # [(x, x, x) for x in past_dummy_shape]
 
-opt_profile[0][:, 1] = (1, 1, 1)
+opt_profile[0][:, 1] = (1, 1, 64)
 opt_profile[1][:, -2] = (1, 256, 1024)
 opt_profiles = []
 opt_profiles.append(opt_profile.copy())
