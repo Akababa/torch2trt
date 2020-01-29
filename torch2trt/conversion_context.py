@@ -223,7 +223,13 @@ class ConversionContext(object):
         if self.fp16_mode and array.dtype in [np.float64, np.float32]:  # TRT doesn't support long
             # print(f"Warning: implicitly converting an array of shape {array.shape} from int64 to int32")
             array = array.astype(np.float16)
-        return self.network.add_constant(shape, array).get_output(0)
+        isbool = array.dtype == np.bool
+        if isbool:  # TRT doesn't support bool constants???
+            array = array.astype(np.int8)
+        output_trt = self.network.add_constant(shape, trt.Weights(array)).get_output(0)
+        # if isbool: # TODO figure out how to add a bool const
+        #     output_trt = self.convert_dtype_to(output_trt, trt.bool)
+        return output_trt
 
     def get_shape_tuple(self, trt_tensor) -> Tuple[Union[int, trt.ITensor]]:
         shape = self._shape_refs.get(trt_tensor.name, None)

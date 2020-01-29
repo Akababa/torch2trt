@@ -35,18 +35,13 @@ class Conv1D(nn.Module):
         self.bias = nn.Parameter(torch.zeros(nf))
 
     def forward(self, x, ds=None):
-        # nx = self.weight.shape[0]
-        # if ds is None:
-        #     ds = DynamicSizes(None, x.size(-2), -1)
-        # assert x.size(-1) == nx
         x = torch.addmm(self.bias, x, self.weight)
-        # x = x.view(ds.input_ids, self.nf)
         return x
 
 
 # torch.nn.Conv1d
 class Attention(nn.Module):
-    def __init__(self, n_embd, n_ctx, config, scale=False):
+    def __init__(self, n_embd, n_ctx, config):
         super(Attention, self).__init__()
         self.output_attentions = config.output_attentions
 
@@ -58,7 +53,6 @@ class Attention(nn.Module):
         self.register_buffer("m1e4", torch.full((1, 1, 1), -1e4))
         self.n_head = config.n_head
         self.n_embd = n_embd
-        self.scale = scale
 
         self.c_attn = Conv1D(n_embd * 3, n_embd)
         self.c_proj = Conv1D(n_embd, n_embd)
@@ -70,8 +64,7 @@ class Attention(nn.Module):
 
     def _attn(self, q, k, v, ds):
         w = torch.matmul(q, k)
-        if self.scale:
-            w /= math.sqrt(v.size(-1))
+        w /= math.sqrt(v.size(-1))
         if self._ds != ds:
             tot_len = ds.input_ids + ds.past
             self._mask = self.tmask[None, ds.past:tot_len, :tot_len]
@@ -139,11 +132,11 @@ class MLP(nn.Module):
 
 
 class Block(nn.Module):
-    def __init__(self, n_ctx, config, scale=False):
+    def __init__(self, n_ctx, config):
         super(Block, self).__init__()
         n_embd = config.n_embd
         self.ln_1 = nn.LayerNorm(n_embd, eps=config.layer_norm_epsilon)
-        self.attn = Attention(n_embd, n_ctx, config, scale)
+        self.attn = Attention(n_embd, n_ctx, config)
         self.ln_2 = nn.LayerNorm(n_embd, eps=config.layer_norm_epsilon)
         self.mlp = MLP(4 * n_embd, config)
 
@@ -187,12 +180,11 @@ class GPT2Model(GPT2PreTrainedModel):
     def __init__(self, config):
         super(GPT2Model, self).__init__(config)
         self.output_past = config.output_past
-        # self.device = torch.device("cuda")
 
         self.wte = nn.Embedding(config.vocab_size, config.n_embd)
         self.wpe = nn.Embedding(config.n_positions, config.n_embd)
         self.drop = nn.Dropout(config.embd_pdrop)
-        self.h = nn.ModuleList([Block(config.n_ctx, config, scale=True) for _ in range(config.n_layer)])
+        self.h = nn.ModuleList([Block(config.n_ctx, config) for _ in range(config.n_layer)])
         self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
 
         self.init_weights()
@@ -207,8 +199,6 @@ class GPT2Model(GPT2PreTrainedModel):
         if input_ids is None:
             raise ValueError("You have to specify either input_ids or inputs_embeds")
 
-        # input_ids = input_ids.to(self.device) # do this before
-        # past = past.to(self.device)
         input_len = input_ids.size(0)
         past_length = past.size(-2)
         ds = DynamicSizes(-1, input_len, past_length)
@@ -228,7 +218,6 @@ class GPT2Model(GPT2PreTrainedModel):
             presents.append(present)
 
         hidden_states = self.ln_f(hidden_states)
-        # hidden_states = hidden_states.view(batch_size, input_len, self.config.n_embd)
 
         return hidden_states, torch.stack(presents)
 
@@ -247,10 +236,8 @@ class GPT2LMHeadModel(GPT2PreTrainedModel):
 
     def forward(self, input_ids: torch.Tensor, **kwargs):
         transformer_outputs = self.transformer(input_ids, **kwargs)
-        hidden_states = transformer_outputs[0]
+        hidden_states, pasts = transformer_outputs[0]
 
         lm_logits = self.lm_head(hidden_states)
 
-        outputs = (lm_logits,) + transformer_outputs[1:]
-
-        return outputs  # (loss), lm_logits, presents, (all hidden_states), (attentions)
+        return lm_logits, pasts

@@ -83,5 +83,7 @@ def torch_device_from_trt(device):
 def validate_shape(shape, minoptmax):
     mins, opts, maxs = np.array(minoptmax)
     shape = np.array(shape)
-    assert all(mins <= opts) and all(opts <= maxs)
-    assert all(mins <= shape) and all(shape <= maxs)
+    assert all(mins <= opts), f"{list(mins)} <= {list(opts)} not satisfied"
+    assert all(opts <= maxs), f"{list(opts)} <= {list(maxs)} not satisfied"
+    assert all(mins <= shape), f"{list(mins)} <= {list(shape)} not satisfied"
+    assert all(shape <= maxs), f"{list(shape)} <= {list(maxs)} not satisfied"

@@ -2,7 +2,7 @@ from ..conversion_context import *
 from torch2trt.module_test import add_module_test
 
 
-def _matmul(ctx, mat1_trt, mat2_trt):
+def _matmul(ctx, mat1_trt, mat2_trt, preserve_dtype=False):
     op1, op2 = trt.MatrixOperation.NONE, trt.MatrixOperation.NONE
     if len(mat1_trt.shape) == len(mat2_trt.shape) - 1:
         op1 = trt.MatrixOperation.VECTOR
@@ -11,9 +11,10 @@ def _matmul(ctx, mat1_trt, mat2_trt):
     else:
         assert len(mat1_trt.shape) == len(mat2_trt.shape)
 
-    assert mat1_trt.dtype == mat2_trt.dtype
+    assert mat1_trt.dtype == mat2_trt.dtype, f"{mat1_trt.dtype} != {mat2_trt.dtype}"
     m1m2_trt = ctx.network.add_matrix_multiply(mat1_trt, op1, mat2_trt, op2).get_output(0)
-    m1m2_trt = ctx.convert_dtype_to(m1m2_trt, mat1_trt.dtype)
+    if preserve_dtype:
+        m1m2_trt = ctx.convert_dtype_to(m1m2_trt, mat1_trt.dtype)
     return m1m2_trt
 
 
@@ -23,7 +24,7 @@ def convert_matmul(ctx):
     mat1_trt = ctx.get_arg("input", 0, to_trt=True)
     mat2_trt = ctx.get_arg("other", 1, to_trt=True)
     output = ctx.method_return
-    output._trt = _matmul(ctx, mat1_trt, mat2_trt)  # TODO fix this!!!
+    output._trt = _matmul(ctx, mat1_trt, mat2_trt, preserve_dtype=True)
 
 
 @tensorrt_converter('torch.addmm')
@@ -33,7 +34,8 @@ def convert_addmm(ctx: ConversionContext):
     mat1_trt = ctx.get_arg("mat1", 1, to_trt=True)
     mat2_trt = ctx.get_arg("mat2", 2, to_trt=True)
 
-    m1m2_trt = _matmul(ctx, mat1_trt, mat2_trt)
+    m1m2_trt = _matmul(ctx, mat1_trt, mat2_trt, preserve_dtype=True)  # TODO constant tracking to allow fused MA
+    # ctx._add_const_trt(input_torch.to(dtype=torch_device_from_trt(m1m2_trt.dtype)).view())
 
     m1m2_trt, input_trt = ctx.broadcast_together(m1m2_trt, input_trt)
     layer = ctx.network.add_elementwise(m1m2_trt, input_trt, trt.ElementWiseOperation.SUM)

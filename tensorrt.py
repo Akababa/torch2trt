@@ -39,8 +39,8 @@ class ILayer:
     def __find_shape(self):
         shape = self.__yolo_shape()
         if self.opname in ("constant",):
-            shape = self.inputs[1].shape
-            self.torch_value = self.inputs[1]
+            shape = self.inputs[0]
+            self.torch_value = self.inputs[1].a if isinstance(self.inputs[1], Weights) else self.inputs[1]
         elif self.opname in ("shape",):
             shape = (len(self.inputs[0].shape),)
             self.torch_value = self.inputs[0].shape
