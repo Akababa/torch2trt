@@ -4,7 +4,7 @@ import torch2trt
 import tensorrt as trt
 import numpy as np
 
-BATCH = True
+BATCH = False
 if not BATCH:
     import gpt2
 else:
@@ -69,7 +69,7 @@ model.to(device)
 model.to(dtype)
 
 if not BATCH:
-    inputs = [inp.squeeze(0) for inp in inputs]
+    inputs = [inp[0] for inp in inputs]
     opt_profiles = [[op_[:, 1:] for op_ in op] for op in opt_profiles]
 
 model(*inputs)

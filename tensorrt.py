@@ -3,6 +3,8 @@ from enum import Enum
 from typing import Callable, Tuple
 import numpy as np
 
+_bool = __builtins__["bool"]  # since I shadowed it
+
 
 class ILayer:
     def __init__(self):
@@ -83,7 +85,7 @@ class ILayer:
             shape = list(self.inputs[0].shape)
             axes = self.inputs[2]
             keep_dims = self.inputs[3]
-            assert isinstance(keep_dims, bool)
+            assert isinstance(keep_dims, _bool)
             axes_list = []
             for i in range(400):
                 ij = (1 << i)
@@ -107,6 +109,10 @@ class ILayer:
         elif self.opname == "fully_connected":
             shape = list(self.inputs[0].shape)
             shape[-3] = self.inputs[2].shape[0]
+        elif self.opname == "select":
+            shape = self.inputs[1].shape
+        elif self.opname == "identity":
+            shape = self.inputs[0].shape
         else:
             print(f"no mock shape for {self.opname}")
         assert shape is not None, "shape mocking failed"
@@ -242,7 +248,8 @@ class Builder:
 
     def create_network(self, flags):
         inet = INetworkDefinition()
-        inet.has_implicit_batch_dimension = not bool(flags & (1 << NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
+        inet.has_implicit_batch_dimension = not \
+            _bool(flags & (1 << NetworkDefinitionCreationFlag.EXPLICIT_BATCH))
         return inet
 
     def create_builder_config(self):
@@ -315,7 +322,7 @@ DeviceType = Enum("DeviceType", "GPU DLA")
 ElementWiseOperation = Enum("ElementWiseOperation",
                             "EQUAL DIV SUB POW LESS OR MIN FLOOR_DIV GREATER XOR MAX AND PROD SUM")
 ActivationType = Enum("ActivationType", "TANH RELU")
-float32, float16, int8, int32, _ = DataType
+float32, float16, int8, int32, bool = DataType
 UnaryOperation = Enum("UnaryOperation", "EXP LOG SQRT RECIP ABS NEG SIN COS TAN SINH COSH ASIN ACOS ATAN CEIL FLOOR")
 ReduceOperation = Enum("ReduceOperation", "MIN MAX PROD AVG SUM")
 PoolingType = Enum("PoolingType", "MAX AVERAGE")

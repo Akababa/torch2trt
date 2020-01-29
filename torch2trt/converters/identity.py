@@ -1,8 +1,6 @@
 from ..conversion_context import *
 
 
-# TODO type conversion using add_identity
-@tensorrt_converter('torch.Tensor.to')
 @tensorrt_converter('torch.Tensor.contiguous')
 @tensorrt_converter('torch.nn.functional.dropout')
 @tensorrt_converter('torch.nn.functional.dropout2d')
@@ -12,6 +10,22 @@ def convert_identity(ctx):
     input_trt = ctx.get_trt_one(input)
     output = ctx.method_return
     output._trt = input_trt
+
+
+@tensorrt_converter('torch.Tensor.to')
+def convert_to(ctx):
+    input_trt = ctx.get_trt_one("input", pos=0, to_trt=True)
+    dtype = ctx.get_arg("dtype", 1, None)
+    if isinstance(dtype, torch.dtype):
+        trt_dtype = torch_dtype_to_trt(dtype)
+        layer = ctx.network.add_identity(input_trt)
+        layer.precision = trt_dtype
+        output_trt = layer.get_output(0)
+    else:
+        output_trt = input_trt
+        
+    output = ctx.method_return
+    output._trt = output_trt
 
 
 @tensorrt_converter('torch.nn.Dropout.forward')

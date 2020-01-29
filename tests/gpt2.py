@@ -22,11 +22,6 @@ GPT2_PRETRAINED_MODEL_ARCHIVE_MAP = {
     "distilgpt2": "https://s3.amazonaws.com/models.huggingface.co/bert/distilgpt2-pytorch_model.bin", }
 
 
-# TODO use BERT plugins .cu once i get this working..
-def gelu(x):
-    return 0.5 * x * (1 + torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * torch.pow(x, 3))))
-
-
 class Conv1D(nn.Module):
     def __init__(self, nf, nx):
         """ Conv1D layer as defined by Radford et al. for OpenAI GPT (and also used in GPT-2)
@@ -40,12 +35,12 @@ class Conv1D(nn.Module):
         self.bias = nn.Parameter(torch.zeros(nf))
 
     def forward(self, x, ds=None):
-        nx = self.weight.shape[0]
-        if ds is None:
-            ds = DynamicSizes(None, x.size(-2), -1)
+        # nx = self.weight.shape[0]
+        # if ds is None:
+        #     ds = DynamicSizes(None, x.size(-2), -1)
         # assert x.size(-1) == nx
-        x = torch.addmm(self.bias, x.view(-1, nx), self.weight)
-        x = x.view(-1, self.nf)
+        x = torch.addmm(self.bias, x, self.weight)
+        # x = x.view(ds.input_ids, self.nf)
         return x
 
 
@@ -58,7 +53,9 @@ class Attention(nn.Module):
         # in Attention: n_embd=768 (nx=n_embd)
         # [switch nx => n_embd from Block to Attention to keep identical to TF implem]
         assert n_embd % config.n_head == 0
-        self.register_buffer("bias", torch.tril(torch.ones(n_ctx, n_ctx)).view(1, 1, n_ctx, n_ctx))
+        # self.register_buffer("bias", torch.tril(torch.ones(n_ctx, n_ctx)).view(1, 1, n_ctx, n_ctx))
+        self.register_buffer("tmask", torch.tril(torch.ones((n_ctx, n_ctx), dtype=torch.bool)))
+        self.register_buffer("m1e4", torch.full((1, 1, 1), -1e4))
         self.n_head = config.n_head
         self.n_embd = n_embd
         self.scale = scale
@@ -69,16 +66,19 @@ class Attention(nn.Module):
         self.resid_dropout = nn.Dropout(config.resid_pdrop)
         # self.pruned_heads = set()
         self._bias = None
+        self._ds = None
 
-    def _attn(self, q, k, v):
+    def _attn(self, q, k, v, ds):
         w = torch.matmul(q, k)
         if self.scale:
             w /= math.sqrt(v.size(-1))
-        nd, ns = w.size(-2), w.size(-1)
-        if self._bias is None:
-            self._bias = self.bias.view(*self.bias.shape[-2:])
-        b = self._bias[None, ns - nd:ns, :ns]
-        w = w * b - 1e4 * (1.0 - b)
+        if self._ds != ds:
+            tot_len = ds.input_ids + ds.past
+            self._mask = self.tmask[None, ds.past:tot_len, :tot_len]
+
+        w = torch.where(self._mask, w, self.m1e4)
+        # w = w * b - 1e4 * (1.0 - b)
+        # w = (w + 1e4) * self._b - 1e4
 
         w = nn.Softmax(dim=-1)(w)
         w = self.attn_dropout(w)
@@ -98,7 +98,7 @@ class Attention(nn.Module):
         else:
             return x.permute(1, 0, 2)  # (batch, head, seq_length, head_features)
 
-    def forward(self, x, layer_past):
+    def forward(self, x, layer_past, ds=None):
         x = self.c_attn(x)
         x = x.view((x.size(0), 3, self.n_embd))
         query, key, value = x[:, 0], x[:, 1], x[:, 2]
@@ -114,7 +114,7 @@ class Attention(nn.Module):
 
         present = torch.stack((key.transpose(-2, -1), value))  # transpose to have same shapes for stacking
 
-        a = self._attn(query, key, value)
+        a = self._attn(query, key, value, ds)
 
         a = self.merge_heads(a)
         a = self.c_proj(a)
@@ -129,7 +129,7 @@ class MLP(nn.Module):
         n_embd = config.n_embd
         self.c_fc = Conv1D(n_state, n_embd)
         self.c_proj = Conv1D(n_embd, n_state)
-        self.act = gelu
+        self.act = torch.nn.GELU()
         self.dropout = nn.Dropout(config.resid_pdrop)
 
     def forward(self, x):

@@ -50,11 +50,11 @@ class ConversionContext(object):
             layer.set_input(1, new_shape_tensor)
         return layer.get_output(0)
 
-    def broadcast_together(self, *tensors: trt.ITensor):
+    def broadcast_together(self, *tensors: trt.ITensor, enforce_same_types=True):
         # Make same number of dims and dtype
         assert all(isinstance(t, trt.ITensor) for t in tensors)
-        if len(set(t.dtype for t in tensors)) > 1:
-            types = [trt.int8, trt.int32, trt.float16, trt.float32]
+        if enforce_same_types and len(set(t.dtype for t in tensors)) > 1:
+            types = [trt.bool, trt.int8, trt.int32, trt.float16, trt.float32]
             if self.fp16_mode:  # prefer 16
                 types[-2], types[-1] = types[-1], types[-2]
             max_type = types[max(types.index(t.dtype) for t in tensors)]
@@ -62,7 +62,7 @@ class ConversionContext(object):
             tensors = [self.convert_dtype_to(t, max_type) for t in tensors]
 
         broadcast_num_dim = max(len(t.shape) for t in tensors)
-        new_tensors = [_make_broadcastable_to(self, t, broadcast_num_dim) for t in tensors]
+        new_tensors = [_make_broadcastable_to(self.network, t, broadcast_num_dim) for t in tensors]
         for i in range(broadcast_num_dim):
             dims_set = set(nt.shape[i] for nt in new_tensors) - {1, -1}
             assert len(dims_set) <= 1
@@ -502,7 +502,7 @@ def _get_tuple_of_shape(ctx, t: trt.ITensor) -> Tuple[Union[int, trt.ITensor]]:
 
 
 # If len(trt_tensor.shape) < broadcast_num_dim, prepends [1] dims to match number of dims in shape
-def _make_broadcastable_to(ctx, trt_tensor: trt.ITensor, broadcast_num_dim: int) -> trt.ITensor:
+def _make_broadcastable_to(network, trt_tensor: trt.ITensor, broadcast_num_dim: int) -> trt.ITensor:
     assert isinstance(trt_tensor, trt.ITensor)
     trt_num_dims = len(trt_tensor.shape)
     assert trt_num_dims <= broadcast_num_dim
@@ -510,7 +510,7 @@ def _make_broadcastable_to(ctx, trt_tensor: trt.ITensor, broadcast_num_dim: int)
         # append 1 size dims to front
         diff = broadcast_num_dim - trt_num_dims
         # shape = tuple([1] * diff + list(trt_tensor.shape))
-        shuffle_layer = ctx.network.add_shuffle(trt_tensor)
+        shuffle_layer = network.add_shuffle(trt_tensor)
         shuffle_layer.reshape_dims = (0,) * trt_num_dims + (1,) * diff
         shuffle_layer.second_transpose = \
             tuple(range(trt_num_dims, broadcast_num_dim)) + tuple(range(trt_num_dims))
