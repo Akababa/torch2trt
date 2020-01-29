@@ -21,6 +21,7 @@ from .clamp import *
 from .div import *
 from .embedding import *
 from .getitem import *
+from .gelu import *
 from .identity import *
 from .instance_norm import *
 # from .loops import *

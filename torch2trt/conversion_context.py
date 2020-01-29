@@ -55,6 +55,8 @@ class ConversionContext(object):
         assert all(isinstance(t, trt.ITensor) for t in tensors)
         if len(set(t.dtype for t in tensors)) > 1:
             types = [trt.int8, trt.int32, trt.float16, trt.float32]
+            if self.fp16_mode:  # prefer 16
+                types[-2], types[-1] = types[-1], types[-2]
             max_type = types[max(types.index(t.dtype) for t in tensors)]
             print(f"promoting {[t.dtype for t in tensors]} to {max_type}")
             tensors = [self.convert_dtype_to(t, max_type) for t in tensors]
@@ -140,7 +142,7 @@ class ConversionContext(object):
         return t_1
 
     # TODO implicit type conversion
-    def get_trt_one(self, t: Union[torch.Tensor, float, int], return_int=False) -> trt.ITensor:
+    def get_trt_one(self, t: Union[torch.Tensor, np.ndarray, float, int], return_int=False) -> trt.ITensor:
         if isinstance(t, trt.ITensor):
             return t
         # GET TRT TENSOR (OR CREATE TRT CONSTANT)
@@ -148,18 +150,23 @@ class ConversionContext(object):
         elif isinstance(t, torch.Tensor) and hasattr(t, '_trt'):
             if return_int and t.shape == () and not t.is_floating_point() and "[Constant]_output" in t._trt.name:
                 return int(t)
-            trt_tensor = t._trt
             shape_ok(t)
+            trt_tensor = t._trt
         # or... add constant for leaf tensor w/o _trt
         elif isinstance(t, torch.Tensor) and not hasattr(t, '_trt'):
             # add leaf tensor - don't exclude batch when adding constants...?
             t._trt = self._add_const_trt(t)
-            trt_tensor = t._trt
             shape_ok(t)
+            trt_tensor = t._trt
+        elif isinstance(t, np.ndarray):
+            trt_tensor = self._add_const_trt(t)
         # or... create and add constant for scalar primitive (lost reference)
         elif isinstance(t, (float, int)):
-            dtype = (torch.float32 if isinstance(t, float) else torch.int32)
-            trt_tensor = self._add_const_trt(torch.tensor(t, dtype=dtype))
+            if isinstance(t, float):
+                dtype = np.float16 if self.fp16_mode else np.float32
+            else:
+                dtype = np.int32
+            trt_tensor = self._add_const_trt(np.array(t, dtype=dtype))
         else:
             raise ValueError(f'Bad tensor of type {type(t)}')
 
@@ -213,6 +220,9 @@ class ConversionContext(object):
         if array.dtype == np.int64:  # TRT doesn't support long
             # print(f"Warning: implicitly converting an array of shape {array.shape} from int64 to int32")
             array = array.astype(np.int32)
+        if self.fp16_mode and array.dtype in [np.float64, np.float32]:  # TRT doesn't support long
+            # print(f"Warning: implicitly converting an array of shape {array.shape} from int64 to int32")
+            array = array.astype(np.float16)
         return self.network.add_constant(shape, array).get_output(0)
 
     def get_shape_tuple(self, trt_tensor) -> Tuple[Union[int, trt.ITensor]]:
@@ -298,13 +308,14 @@ class ConversionContext(object):
         for hook in self.hooks:
             hook.__exit__(type, val, tb)
 
-    def __init__(self, network: trt.INetworkDefinition, converters=CONVERTERS):
+    def __init__(self, network: trt.INetworkDefinition, fp16_mode=False, converters=CONVERTERS):
         self.network = network
         self.lock = False
         self.method_args = None
         self.method_kwargs = None
         self.method_return = None
         self.method_str = None
+        self.fp16_mode = fp16_mode
         self._first_input = None
         self._up1 = dict()  # for fewer unnecessary reshapes
         self._shape_refs = dict()  # (name of trt.ITensor)->tuple[Union[int, trt.ITensor]]

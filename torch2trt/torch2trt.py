@@ -13,7 +13,6 @@ def torch2trt(module,
               optimization_profiles=None,  # Required for dynamic input shapes
               output_names=None,
               log_level=trt.Logger.WARNING,
-              max_batch_size=1,
               fp16_mode=False,
               max_workspace_size=0,
               strict_type_constraints=False,
@@ -74,7 +73,7 @@ def torch2trt(module,
 
     network = builder.create_network(flags=build_flags)
 
-    ctx = ConversionContext(network)
+    ctx = ConversionContext(network, fp16_mode)
     if isinstance(inputs, list):
         inputs = tuple(inputs)
     if not isinstance(inputs, tuple):

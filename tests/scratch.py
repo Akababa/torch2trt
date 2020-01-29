@@ -15,9 +15,9 @@ else:
 
 torch.manual_seed(0)
 
-past_dummy_seq_length = 71
+past_dummy_seq_length = 31
 input_dummy_seq_length = 11
-ex_batch_size = 53
+ex_batch_size = 3
 
 config = gpt2.GPT2Config()  # n_layer=2, n_head=2, n_embd=4, vocab_size=10)
 dtype = torch.float32

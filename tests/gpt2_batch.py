@@ -23,8 +23,8 @@ DynamicSizes = namedtuple("DynamicSizes", "batch input_ids past")
 
 
 # TODO use BERT plugins .cu once i get this working..
-def gelu(x):
-    return 0.5 * x * (1 + torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * torch.pow(x, 3))))
+# def gelu(x):
+#     return 0.5 * x * (1 + torch.tanh(math.sqrt(2 / math.pi) * (x + 0.044715 * torch.pow(x, 3))))
 
 
 class Conv1D(nn.Module):
@@ -137,7 +137,7 @@ class MLP(nn.Module):
         n_embd = config.n_embd
         self.c_fc = Conv1D(n_state, n_embd)
         self.c_proj = Conv1D(n_embd, n_state)
-        self.act = gelu
+        self.act = torch.nn.GELU()
         self.dropout = nn.Dropout(config.resid_pdrop)
 
     def forward(self, x, input_sizes=None):
