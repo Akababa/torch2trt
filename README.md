@@ -166,6 +166,12 @@ the following
 
 Please see [this folder](torch2trt/converters) for more examples.
 
+## Tips
+
+Try to specify dynamic sizes in one variable and use it everywhere, rather than calling Tensor.size() on a chain of tensors. 
+TRT can get confused and lose track of the dimension in the latter case, while the former keeps the shape inference tree shallow.
+
+Turn on debug_sync and check the logs for debugging.
 
 ## Errors
 Check stderr for TRT error messages (they don't show up in Python). In colab, go to Runtime > View Runtime logs

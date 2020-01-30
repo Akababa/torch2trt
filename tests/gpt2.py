@@ -8,7 +8,7 @@ import torch
 import torch.nn as nn
 from torch.nn import ModuleList
 from transformers.configuration_gpt2 import GPT2Config
-from transformers.modeling_gpt2 import load_tf_weights_in_gpt2
+from transformers.modeling_gpt2 import load_tf_weights_in_gpt2, gelu
 from transformers.modeling_utils import PreTrainedModel, prune_conv1d_layer
 
 logger = logging.getLogger(__name__)
@@ -32,19 +32,19 @@ class Conv1D(nn.Module):
         w = torch.empty(nx, nf)
         nn.init.normal_(w, std=0.02)
         self.weight = nn.Parameter(w)
+        self._weightT = None
         self.bias = nn.Parameter(torch.zeros(nf))
 
     def forward(self, x, ds=None):
-        x = torch.addmm(self.bias, x, self.weight)
-        return x
+        if self._weightT is None:
+            self._weightT = self.weight.T
+        return torch.nn.functional.linear(x, self._weightT, self.bias)
 
 
 # torch.nn.Conv1d
 class Attention(nn.Module):
     def __init__(self, n_embd, n_ctx, config):
         super(Attention, self).__init__()
-        self.output_attentions = config.output_attentions
-
         # in Attention: n_embd=768 (nx=n_embd)
         # [switch nx => n_embd from Block to Attention to keep identical to TF implem]
         assert n_embd % config.n_head == 0
@@ -56,26 +56,18 @@ class Attention(nn.Module):
 
         self.c_attn = Conv1D(n_embd * 3, n_embd)
         self.c_proj = Conv1D(n_embd, n_embd)
-        self.attn_dropout = nn.Dropout(config.attn_pdrop)
-        self.resid_dropout = nn.Dropout(config.resid_pdrop)
-        # self.pruned_heads = set()
-        self._bias = None
         self._ds = None
 
     def _attn(self, q, k, v, ds):
         w = torch.matmul(q, k)
         w /= math.sqrt(v.size(-1))
         if self._ds != ds:
+            self._ds = ds
             tot_len = ds.input_ids + ds.past
             self._mask = self.tmask[None, ds.past:tot_len, :tot_len]
 
         w = torch.where(self._mask, w, self.m1e4)
-        # w = w * b - 1e4 * (1.0 - b)
-        # w = (w + 1e4) * self._b - 1e4
-
         w = nn.Softmax(dim=-1)(w)
-        w = self.attn_dropout(w)
-
         return torch.matmul(w, v)
 
     def merge_heads(self, x: torch.Tensor):
@@ -83,13 +75,10 @@ class Attention(nn.Module):
         new_x_shape = x.size()[:-2] + (self.n_embd,)
         return x.view(*new_x_shape)  # in Tensorflow implem: fct merge_states
 
-    def split_heads(self, x, k=False):
+    def split_heads(self, x):
         new_x_shape = x.size()[:-1] + (self.n_head, self.n_embd // self.n_head)  # x.size(-1) // self.n_head)
         x = x.view(*new_x_shape)  # in Tensorflow implem: fct split_states
-        if k:
-            return x.permute(1, 2, 0)  # (batch, head, head_features, seq_length)
-        else:
-            return x.permute(1, 0, 2)  # (batch, head, seq_length, head_features)
+        return x.permute(1, 0, 2)  # (batch, head, seq_length, head_features)
 
     def forward(self, x, layer_past, ds=None):
         x = self.c_attn(x)
@@ -97,21 +86,19 @@ class Attention(nn.Module):
         query, key, value = x[:, 0], x[:, 1], x[:, 2]
         # query, key, value = x.split(self.split_size, dim=2)
         query = self.split_heads(query)
-        key = self.split_heads(key, k=True)
+        key = self.split_heads(key)  # , k=True)
         value = self.split_heads(value)
 
-        past_key = layer_past[0].transpose(-2, -1)
         past_value = layer_past[1]  # transpose back cf below
-        key = torch.cat((past_key, key), dim=-1)  # this one crashes colab
         value = torch.cat((past_value, value), dim=-2)
 
-        present = torch.stack((key.transpose(-2, -1), value))  # transpose to have same shapes for stacking
+        past_key = layer_past[0]  # .transpose(-2, -1)
+        key = torch.cat((past_key, key), dim=-2)  # this one crashes colab
+        present = torch.stack([key, value])  # transpose to have same shapes for stacking
 
-        a = self._attn(query, key, value, ds)
-
+        a = self._attn(query, key.transpose(-2, -1), value, ds)
         a = self.merge_heads(a)
         a = self.c_proj(a)
-        a = self.resid_dropout(a)
 
         return a, present
 
@@ -122,13 +109,12 @@ class MLP(nn.Module):
         n_embd = config.n_embd
         self.c_fc = Conv1D(n_state, n_embd)
         self.c_proj = Conv1D(n_embd, n_state)
-        self.act = torch.nn.GELU()
-        self.dropout = nn.Dropout(config.resid_pdrop)
+        self.act = torch.nn.GELU()  # This is a possible difference
 
     def forward(self, x):
         h = self.act(self.c_fc(x))
         h2 = self.c_proj(h)
-        return self.dropout(h2)
+        return h2
 
 
 class Block(nn.Module):
@@ -146,7 +132,6 @@ class Block(nn.Module):
         x += self.mlp(self.ln_2(x))  # residual
 
         return x, present  # x, present
-        # return outputs  # x, present, (attentions)
 
 
 class GPT2PreTrainedModel(PreTrainedModel):
@@ -183,7 +168,6 @@ class GPT2Model(GPT2PreTrainedModel):
 
         self.wte = nn.Embedding(config.vocab_size, config.n_embd)
         self.wpe = nn.Embedding(config.n_positions, config.n_embd)
-        self.drop = nn.Dropout(config.embd_pdrop)
         self.h = nn.ModuleList([Block(config.n_ctx, config) for _ in range(config.n_layer)])
         self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
 
@@ -202,13 +186,11 @@ class GPT2Model(GPT2PreTrainedModel):
         input_len = input_ids.size(0)
         past_length = past.size(-2)
         ds = DynamicSizes(-1, input_len, past_length)
-        past = past.transpose(1, 0)  # permute((1, 0, 2, 3, 4))
 
         position_embeds = self.wpe.weight.data[past_length:past_length + input_len]
 
         inputs_embeds = self.wte(input_ids)
         hidden_states = inputs_embeds + position_embeds
-        hidden_states = self.drop(hidden_states)  # dropout
 
         presents = []
         for i in range(self.config.n_layer):
@@ -218,7 +200,6 @@ class GPT2Model(GPT2PreTrainedModel):
             presents.append(present)
 
         hidden_states = self.ln_f(hidden_states)
-
         return hidden_states, torch.stack(presents)
 
 
@@ -235,9 +216,6 @@ class GPT2LMHeadModel(GPT2PreTrainedModel):
         return self.lm_head
 
     def forward(self, input_ids: torch.Tensor, **kwargs):
-        transformer_outputs = self.transformer(input_ids, **kwargs)
-        hidden_states, pasts = transformer_outputs[0]
-
+        hidden_states, pasts = self.transformer(input_ids, **kwargs)
         lm_logits = self.lm_head(hidden_states)
-
         return lm_logits, pasts

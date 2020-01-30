@@ -35,7 +35,10 @@ def convert_addmm(ctx: ConversionContext):
     mat2_trt = ctx.get_arg("mat2", 2, to_trt=True)
 
     m1m2_trt = _matmul(ctx, mat1_trt, mat2_trt, preserve_dtype=True)  # TODO constant tracking to allow fused MA
-    # ctx._add_const_trt(input_torch.to(dtype=torch_device_from_trt(m1m2_trt.dtype)).view())
+    # input_torch = input_torch.to(dtype=torch_device_from_trt(m1m2_trt.dtype))
+    # if len(input_torch.shape) < len(m1m2_trt.shape):
+    #     input_torch = input_torch.view((1,) * len(m1m2_trt.shape))
+    # input_trt = ctx.get_trt_one(input_torch)
 
     m1m2_trt, input_trt = ctx.broadcast_together(m1m2_trt, input_trt)
     layer = ctx.network.add_elementwise(m1m2_trt, input_trt, trt.ElementWiseOperation.SUM)

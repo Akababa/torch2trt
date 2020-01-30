@@ -69,7 +69,6 @@ class ConversionContext(object):
 
         return new_tensors
 
-    # TODO use this everywhere
     def make_shape_tensor(self, shape):
         # Makes a 1d shape trt tensor from a mixed tuple (of python ints and trt scalars)
         mixed_dims = []
@@ -81,7 +80,7 @@ class ConversionContext(object):
                     mixed_dims.append([s])
             else:
                 mixed_dims.append(self._shape0to1(self.get_trt_one(s)))
-        trt_dims = [self._add_const_trt(np.array(md, dtype=np.int32)) if isinstance(md, list)
+        trt_dims = [self._add_const_trt(np.array(md, dtype=np.int32), False) if isinstance(md, list)
                     else md for md in mixed_dims]
         layer = self.network.add_concatenation(trt_dims)
         layer.axis = 0
@@ -142,7 +141,7 @@ class ConversionContext(object):
         return t_1
 
     # TODO implicit type conversion
-    def get_trt_one(self, t: Union[torch.Tensor, np.ndarray, float, int], return_int=False) -> trt.ITensor:
+    def get_trt_one(self, t: Union[torch.Tensor, np.ndarray, float, int], weight=False, return_int=False) -> trt.ITensor:
         if isinstance(t, trt.ITensor):
             return t
         # GET TRT TENSOR (OR CREATE TRT CONSTANT)
@@ -150,27 +149,26 @@ class ConversionContext(object):
         elif isinstance(t, torch.Tensor) and hasattr(t, '_trt'):
             if return_int and t.shape == () and not t.is_floating_point() and "[Constant]_output" in t._trt.name:
                 return int(t)
-            shape_ok(t)
+            # shape_ok(t)
             trt_tensor = t._trt
         # or... add constant for leaf tensor w/o _trt
         elif isinstance(t, torch.Tensor) and not hasattr(t, '_trt'):
             # add leaf tensor - don't exclude batch when adding constants...?
-            t._trt = self._add_const_trt(t)
-            shape_ok(t)
+            t._trt = self._add_const_trt(t, weight)
+            # shape_ok(t)
             trt_tensor = t._trt
         elif isinstance(t, np.ndarray):
-            trt_tensor = self._add_const_trt(t)
+            trt_tensor = self._add_const_trt(t, weight)
         # or... create and add constant for scalar primitive (lost reference)
         elif isinstance(t, (float, int)):
             if isinstance(t, float):
                 dtype = np.float16 if self.fp16_mode else np.float32
             else:
                 dtype = np.int32
-            trt_tensor = self._add_const_trt(np.array(t, dtype=dtype))
+            trt_tensor = self._add_const_trt(np.array(t, dtype=dtype), weight)
         else:
             raise ValueError(f'Bad tensor of type {type(t)}')
 
-        assert trt_tensor.shape.__len__() >= 0
         return trt_tensor
 
     def convert_dtype_to(self, tensor: trt.ITensor, dtype: trt.DataType):
@@ -213,7 +211,7 @@ class ConversionContext(object):
 
         return axes
 
-    def _add_const_trt(self, tensor: Union[torch.Tensor, np.ndarray]):
+    def _add_const_trt(self, tensor: Union[torch.Tensor, np.ndarray], weight):
         shape = tuple(tensor.shape)
         array = tensor.detach().cpu().numpy() if isinstance(tensor, torch.Tensor) else tensor
         assert isinstance(array, np.ndarray)
@@ -225,8 +223,11 @@ class ConversionContext(object):
             array = array.astype(np.float16)
         isbool = array.dtype == np.bool
         if isbool:  # TRT doesn't support bool constants???
-            array = array.astype(np.int8)
-        output_trt = self.network.add_constant(shape, trt.Weights(array)).get_output(0)
+            array = array.astype(np.float16)
+        trt_weights = trt.Weights(array)
+        if weight:
+            return trt_weights
+        output_trt = self.network.add_constant(shape, trt_weights).get_output(0)
         # if isbool: # TODO figure out how to add a bool const
         #     output_trt = self.convert_dtype_to(output_trt, trt.bool)
         return output_trt

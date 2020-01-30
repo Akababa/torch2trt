@@ -107,8 +107,8 @@ class ILayer:
             if self.axis == 0 and len(cats[0].shape) == 1:
                 self.torch_value = np.concatenate([inp.torch_value for inp in cats], axis=self.axis)
         elif self.opname == "fully_connected":
-            shape = list(self.inputs[0].shape)
-            shape[-3] = self.inputs[2].shape[0]
+            shape = list(self.inputs[0].shape[:-3]) + [self.inputs[1], 1, 1]
+            # shape[-3] = self.inputs[2].shape[0]
         elif self.opname == "select":
             shape = self.inputs[1].shape
         elif self.opname == "identity":
@@ -175,6 +175,7 @@ class ILayer:
 class INetworkDefinition:
     def __init__(self):
         self.has_implicit_batch_dimension = False
+        self._layers = []
         self.num_layers = 0
 
     def add_input(self, name, dtype, shape):
@@ -190,23 +191,21 @@ class INetworkDefinition:
     def mark_output(self, trt_tensor):
         pass
 
-    def __getattr__(self, name) -> ILayer:
-        if name[:4] == "add_":
-            layer = make_add_layer_func(name[4:], self.num_layers)
+    def __getattr__(self, name) -> Callable[..., ILayer]:
+        if name[:4] != "add_":
+            raise AttributeError
+
+        def add_layer(*inputs, **kwargs) -> ILayer:
+            layer = ILayer()
+            layer.name = f"Unnamed Layer* {self.num_layers}"
             self.num_layers += 1
+            layer.opname = name[4:]
+            layer.inputs = list(inputs) + list(kwargs.values())
+            layer.kwargs = kwargs
+            self._layers.append(layer)
             return layer
 
-
-def make_add_layer_func(layer_name, i):
-    def add_layer(*inputs, **kwargs):
-        layer = ILayer()
-        layer.name = f"Unnamed Layer* {i}"
-        layer.opname = layer_name
-        layer.inputs = list(inputs) + list(kwargs.values())
-        layer.kwargs = kwargs
-        return layer
-
-    return add_layer
+        return add_layer
 
 
 class ILoop(ILayer):

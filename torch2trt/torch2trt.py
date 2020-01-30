@@ -81,7 +81,7 @@ def torch2trt(module,
 
     ctx.add_inputs(inputs, input_shapes=input_shapes, names=input_names)
 
-    with ctx:
+    with ctx, torch.no_grad():
         if input_names is None:
             outputs = module(*inputs)
         else:
