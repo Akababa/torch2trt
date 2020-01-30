@@ -19,11 +19,12 @@ def convert_to(ctx):
     if isinstance(dtype, torch.dtype):
         trt_dtype = torch_dtype_to_trt(dtype)
         layer = ctx.network.add_identity(input_trt)
-        layer.precision = trt_dtype
+        # layer.precision = trt_dtype
+        layer.set_output_dtype(0, trt_dtype)
         output_trt = layer.get_output(0)
     else:
         output_trt = input_trt
-        
+
     output = ctx.method_return
     output._trt = output_trt
 

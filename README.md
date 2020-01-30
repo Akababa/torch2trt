@@ -171,6 +171,11 @@ Please see [this folder](torch2trt/converters) for more examples.
 Try to specify dynamic sizes in one variable and use it everywhere, rather than calling Tensor.size() on a chain of tensors. 
 TRT can get confused and lose track of the dimension in the latter case, while the former keeps the shape inference tree shallow.
 
+Help TRT avoid layer duplication by caching the results of reshapes and type conversions. 
+The fewer layers there are, the easier it is for TRT to optimize.
+
+Watch out for shape inference explosion in the logs.
+
 Turn on debug_sync and check the logs for debugging.
 
 ## Errors

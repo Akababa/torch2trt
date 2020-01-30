@@ -7,19 +7,13 @@ import os
 import torch
 import torch.nn as nn
 from torch.nn import ModuleList
-from transformers.configuration_gpt2 import GPT2Config
-from transformers.modeling_gpt2 import load_tf_weights_in_gpt2, gelu
+from transformers.configuration_gpt2 import GPT2Config, GPT2_PRETRAINED_CONFIG_ARCHIVE_MAP
+from transformers.modeling_gpt2 import load_tf_weights_in_gpt2, gelu, GPT2_PRETRAINED_MODEL_ARCHIVE_MAP
 from transformers.modeling_utils import PreTrainedModel, prune_conv1d_layer
 
 logger = logging.getLogger(__name__)
 
 DynamicSizes = namedtuple("DynamicSizes", "batch input_ids past total_len")
-GPT2_PRETRAINED_MODEL_ARCHIVE_MAP = {
-    "gpt2": "https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-pytorch_model.bin",
-    "gpt2-medium": "https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-medium-pytorch_model.bin",
-    "gpt2-large": "https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-large-pytorch_model.bin",
-    "gpt2-xl": "https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-xl-pytorch_model.bin",
-    "distilgpt2": "https://s3.amazonaws.com/models.huggingface.co/bert/distilgpt2-pytorch_model.bin", }
 
 
 class Conv1D(nn.Module):
@@ -70,7 +64,9 @@ class Attention(nn.Module):
         if dskey in Attention.buffers_sliced:
             mask = Attention.buffers_sliced[dskey]
         else:
-            mask = self.tmask[None, ds.past:ds.total_len, :ds.total_len].to(torch.bool)
+            mask = self.tmask[None, ds.past:ds.total_len, :ds.total_len]. \
+                view(1, ds.input_ids, ds.total_len). \
+                to(torch.bool)
             Attention.buffers_sliced[dskey] = mask
 
         w = torch.where(mask, w, self.m1e4)
@@ -171,7 +167,6 @@ class GPT2Model(GPT2PreTrainedModel):
 
     def __init__(self, config):
         super(GPT2Model, self).__init__(config)
-        self.output_past = config.output_past
 
         self.wte = nn.Embedding(config.vocab_size, config.n_embd)
         self.wpe = nn.Embedding(config.n_positions, config.n_embd)

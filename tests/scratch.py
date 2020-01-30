@@ -3,7 +3,7 @@ from torch import nn
 import torch2trt
 import tensorrt as trt
 import numpy as np
-from transformers import GPT2Model as gpt2orig
+from transformers import GPT2Model as gpt2orig, GPT2Config
 
 BATCH = False
 if not BATCH:
@@ -17,7 +17,7 @@ past_dummy_seq_length = 31
 input_dummy_seq_length = 11
 ex_batch_size = 3
 
-config = gpt2.GPT2Config()  # n_layer=2, n_head=2, n_embd=4, vocab_size=10)
+config = GPT2Config.from_pretrained("gpt2-medium")  # n_layer=2, n_head=2, n_embd=4, vocab_size=10)
 dtype = torch.float32
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
@@ -41,7 +41,7 @@ if TEST == "transformer":
 
 # GPT2 test
 if TEST[:4] == "gpt2":
-    model = gpt2.GPT2Model(config).from_pretrained("gpt2")
+    model = gpt2.GPT2Model(config)
     input_names = ["input_ids", "past"]
     input_dummy_shape = (ex_batch_size, input_dummy_seq_length)
     past_dummy_shape = (config.n_layer, 2, ex_batch_size, config.n_head, past_dummy_seq_length,

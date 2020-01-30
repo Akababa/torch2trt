@@ -36,6 +36,9 @@ class ILayer:
             if i == 3:
                 self.stride = inp
 
+    def set_output_dtype(self, i, dtype):
+        self.dtype = dtype
+
     def __find_shape(self):
         shape = self.__yolo_shape()
         if self.opname in ("constant",):
