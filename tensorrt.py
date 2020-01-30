@@ -111,7 +111,11 @@ class ILayer:
             # shape[-3] = self.inputs[2].shape[0]
         elif self.opname == "select":
             shape = self.inputs[1].shape
-        elif self.opname == "identity":
+        elif self.opname in ["identity", "activation"]:
+            shape = self.inputs[0].shape
+            if hasattr(self, "precision"):
+                self.dtype = self.precision
+        elif self.opname in ["activation"]:
             shape = self.inputs[0].shape
         else:
             print(f"no mock shape for {self.opname}")

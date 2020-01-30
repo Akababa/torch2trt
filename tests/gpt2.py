@@ -13,7 +13,7 @@ from transformers.modeling_utils import PreTrainedModel, prune_conv1d_layer
 
 logger = logging.getLogger(__name__)
 
-DynamicSizes = namedtuple("DynamicSizes", "batch input_ids past")
+DynamicSizes = namedtuple("DynamicSizes", "batch input_ids past total_len")
 GPT2_PRETRAINED_MODEL_ARCHIVE_MAP = {
     "gpt2": "https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-pytorch_model.bin",
     "gpt2-medium": "https://s3.amazonaws.com/models.huggingface.co/bert/gpt2-medium-pytorch_model.bin",
@@ -41,32 +41,39 @@ class Conv1D(nn.Module):
         return torch.nn.functional.linear(x, self._weightT, self.bias)
 
 
-# torch.nn.Conv1d
 class Attention(nn.Module):
+    buffers = dict()
+    buffers_sliced = dict()
+
     def __init__(self, n_embd, n_ctx, config):
         super(Attention, self).__init__()
         # in Attention: n_embd=768 (nx=n_embd)
         # [switch nx => n_embd from Block to Attention to keep identical to TF implem]
         assert n_embd % config.n_head == 0
         # self.register_buffer("bias", torch.tril(torch.ones(n_ctx, n_ctx)).view(1, 1, n_ctx, n_ctx))
-        self.register_buffer("tmask", torch.tril(torch.ones((n_ctx, n_ctx), dtype=torch.bool)))
+        if n_ctx not in Attention.buffers:
+            Attention.buffers[n_ctx] = torch.tril(torch.ones((n_ctx, n_ctx), dtype=torch.bool))
+        self.register_buffer("tmask", Attention.buffers[n_ctx])
         self.register_buffer("m1e4", torch.full((1, 1, 1), -1e4))
+        self.n_ctx = n_ctx
         self.n_head = config.n_head
         self.n_embd = n_embd
 
         self.c_attn = Conv1D(n_embd * 3, n_embd)
         self.c_proj = Conv1D(n_embd, n_embd)
-        self._ds = None
+        # self._ds = None
 
     def _attn(self, q, k, v, ds):
         w = torch.matmul(q, k)
         w /= math.sqrt(v.size(-1))
-        if self._ds != ds:
-            self._ds = ds
-            tot_len = ds.input_ids + ds.past
-            self._mask = self.tmask[None, ds.past:tot_len, :tot_len]
+        dskey = (ds.past, ds.total_len)
+        if dskey in Attention.buffers_sliced:
+            mask = Attention.buffers_sliced[dskey]
+        else:
+            mask = self.tmask[None, ds.past:ds.total_len, :ds.total_len].to(torch.bool)
+            Attention.buffers_sliced[dskey] = mask
 
-        w = torch.where(self._mask, w, self.m1e4)
+        w = torch.where(mask, w, self.m1e4)
         w = nn.Softmax(dim=-1)(w)
         return torch.matmul(w, v)
 
@@ -185,7 +192,7 @@ class GPT2Model(GPT2PreTrainedModel):
 
         input_len = input_ids.size(0)
         past_length = past.size(-2)
-        ds = DynamicSizes(-1, input_len, past_length)
+        ds = DynamicSizes(-1, input_len, past_length, input_len + past_length)
 
         position_embeds = self.wpe.weight.data[past_length:past_length + input_len]
 

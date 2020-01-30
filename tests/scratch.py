@@ -56,9 +56,9 @@ opt_profile[0][:, -1] = (1, 1, 64)
 opt_profile[1][:, -2] = (1, 256, 1024)
 opt_profiles = []
 opt_profiles.append(opt_profile.copy())
-# opt_profile[0][:, 1] = (1, 256, 1024)
-# opt_profile[1][:, -2] = (0, 0, 0)
-# opt_profiles.append(opt_profile.copy())
+opt_profile[0][:, -1] = (64, 64, 64)
+opt_profile[1][:, -2] = (1, 256, 1024)
+opt_profiles.append(opt_profile.copy())
 
 inputs = [torch.zeros(input_dummy_shape, dtype=torch.long if TEST[:4] == "gpt2" else dtype, device=device),
           torch.rand(past_dummy_shape, dtype=dtype, device=device)]

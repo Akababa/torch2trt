@@ -14,7 +14,7 @@ def convert_identity(ctx):
 
 @tensorrt_converter('torch.Tensor.to')
 def convert_to(ctx):
-    input_trt = ctx.get_trt_one("input", pos=0, to_trt=True)
+    input_trt = ctx.get_arg("input", pos=0, to_trt=True)
     dtype = ctx.get_arg("dtype", 1, None)
     if isinstance(dtype, torch.dtype):
         trt_dtype = torch_dtype_to_trt(dtype)
