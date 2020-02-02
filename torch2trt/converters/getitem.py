@@ -20,6 +20,7 @@ def slice_to_trt(ctx, dim_size, dim_slice):
         if start == 0:
             size = stop
         else:
+            print("Subtracting start and stop can cause shape inference issues, try to use start=0 with a dynamic stop")
             size = ctx.network.add_elementwise(
                 stop, ctx.get_trt_one(start), trt.ElementWiseOperation.SUB).get_output(0)
     elif isinstance(start, trt.ITensor):

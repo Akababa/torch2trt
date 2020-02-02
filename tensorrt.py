@@ -84,6 +84,16 @@ class ILayer:
         elif self.opname in ("elementwise",):
             shape = tuple(-1 if -1 in (i0, i1) else max(i0, i1)
                           for i0, i1 in zip(self.inputs[0].shape, self.inputs[1].shape))
+            if shape == ():
+                v1, v2 = int(self.inputs[0].torch_value), int(self.inputs[1].torch_value)
+                if -1 in (v1, v2):
+                    self.torch_value = -1
+                elif self.inputs[2] == ElementWiseOperation.SUM:
+                    self.torch_value = v1 + v2
+                elif self.inputs[2] == ElementWiseOperation.SUB:
+                    self.torch_value = v1 - v2
+                else:
+                    print("couldn't infer shape dim")
         elif self.opname in ("reduce",):
             shape = list(self.inputs[0].shape)
             axes = self.inputs[2]

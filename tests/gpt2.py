@@ -139,12 +139,13 @@ class GPT2Model(GPT2PreTrainedModel):
         input_len = input_ids.size(0)
         past_length = past.size(-2) if past is not None else 0
         total_len = input_len + past_length
-        position_embeds = self.wpe.weight.data[past_length:total_len].view(input_len, self.config.n_embd)
+        # position_embeds = self.wpe.weight.data[past_length:total_len].view(input_len, self.config.n_embd)
+        position_embeds = self.wpe.weight.data[past_length:][:input_len]
 
         inputs_embeds = self.wte(input_ids)
         hidden_states = inputs_embeds + position_embeds
 
-        mask = self.bigmask[None, past_length:total_len, :total_len]
+        mask = self.bigmask[past_length:, :total_len][None, :input_len]
         presents = []
         for i in range(self.config.n_layer):
             layer_past = past[i] if past is not None else None

@@ -17,7 +17,7 @@ past_dummy_seq_length = 31
 input_dummy_seq_length = 11
 ex_batch_size = 3
 
-config = GPT2Config.from_pretrained("gpt2-medium")  # n_layer=2, n_head=2, n_embd=4, vocab_size=10)
+config = GPT2Config.from_pretrained("gpt2-large")  # n_layer=2, n_head=2, n_embd=4, vocab_size=10)
 dtype = torch.float32
 device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
