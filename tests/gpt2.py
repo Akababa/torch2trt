@@ -1,22 +1,11 @@
-from __future__ import absolute_import, division, print_function, unicode_literals
-from collections import namedtuple
-import logging
 import math
-import os
 
 import torch
-import torch.nn as nn
-from torch.nn import ModuleList
-from transformers.configuration_gpt2 import GPT2Config, GPT2_PRETRAINED_CONFIG_ARCHIVE_MAP
-from transformers.modeling_gpt2 import load_tf_weights_in_gpt2, gelu, GPT2_PRETRAINED_MODEL_ARCHIVE_MAP
-from transformers.modeling_utils import PreTrainedModel, prune_conv1d_layer
-
-logger = logging.getLogger(__name__)
-
-DynamicSizes = namedtuple("DynamicSizes", "batch input_ids past total_len")
+from transformers.configuration_gpt2 import GPT2Config
+from transformers.modeling_gpt2 import load_tf_weights_in_gpt2, gelu, GPT2PreTrainedModel
 
 
-class Conv1D(nn.Module):
+class Conv1D(torch.nn.Module):
     def __init__(self, nf, nx):
         """ Conv1D layer as defined by Radford et al. for OpenAI GPT (and also used in GPT-2)
             Basically works like a Linear layer but the weights are transposed
@@ -24,30 +13,23 @@ class Conv1D(nn.Module):
         super(Conv1D, self).__init__()
         self.nf = nf
         w = torch.empty(nx, nf)
-        nn.init.normal_(w, std=0.02)
-        self.weight = nn.Parameter(w)
+        torch.nn.init.normal_(w, std=0.02)
+        self.weight = torch.nn.Parameter(w)
         self._weightT = None
-        self.bias = nn.Parameter(torch.zeros(nf))
+        self.bias = torch.nn.Parameter(torch.zeros(nf))
 
-    def forward(self, x, ds=None):
+    def forward(self, x):
         if self._weightT is None:
             self._weightT = self.weight.T
         return torch.nn.functional.linear(x, self._weightT, self.bias)
 
 
-class Attention(nn.Module):
-    buffers = dict()
-    buffers_sliced = dict()
-
+class Attention(torch.nn.Module):
     def __init__(self, n_embd, n_ctx, config):
         super(Attention, self).__init__()
         # in Attention: n_embd=768 (nx=n_embd)
         # [switch nx => n_embd from Block to Attention to keep identical to TF implem]
         assert n_embd % config.n_head == 0
-        # self.register_buffer("bias", torch.tril(torch.ones(n_ctx, n_ctx)).view(1, 1, n_ctx, n_ctx))
-        if n_ctx not in Attention.buffers:
-            Attention.buffers[n_ctx] = torch.tril(torch.ones((n_ctx, n_ctx), dtype=torch.bool))
-        self.register_buffer("tmask", Attention.buffers[n_ctx])
         self.register_buffer("m1e4", torch.full((1, 1, 1), -1e4))
         self.n_ctx = n_ctx
         self.n_head = config.n_head
@@ -55,22 +37,13 @@ class Attention(nn.Module):
 
         self.c_attn = Conv1D(n_embd * 3, n_embd)
         self.c_proj = Conv1D(n_embd, n_embd)
-        # self._ds = None
 
-    def _attn(self, q, k, v, ds):
+    def _attn(self, q, k, v, mask):
         w = torch.matmul(q, k)
         w /= math.sqrt(v.size(-1))
-        dskey = (ds.past, ds.total_len)
-        if dskey in Attention.buffers_sliced:
-            mask = Attention.buffers_sliced[dskey]
-        else:
-            mask = self.tmask[None, ds.past:ds.total_len, :ds.total_len]. \
-                view(1, ds.input_ids, ds.total_len). \
-                to(torch.bool)
-            Attention.buffers_sliced[dskey] = mask
 
         w = torch.where(mask, w, self.m1e4)
-        w = nn.Softmax(dim=-1)(w)
+        w = torch.nn.Softmax(dim=-1)(w)
         return torch.matmul(w, v)
 
     def merge_heads(self, x: torch.Tensor):
@@ -83,36 +56,40 @@ class Attention(nn.Module):
         x = x.view(*new_x_shape)  # in Tensorflow implem: fct split_states
         return x.permute(1, 0, 2)  # (batch, head, seq_length, head_features)
 
-    def forward(self, x, layer_past, ds=None):
+    def forward(self, x, layer_past, mask):
         x = self.c_attn(x)
         x = x.view((x.size(0), 3, self.n_embd))
         query, key, value = x[:, 0], x[:, 1], x[:, 2]
-        # query, key, value = x.split(self.split_size, dim=2)
+        # query, key, value = x.split(self.n_embd, dim=2)
         query = self.split_heads(query)
         key = self.split_heads(key)  # , k=True)
         value = self.split_heads(value)
 
-        past_value = layer_past[1]  # transpose back cf below
-        value = torch.cat((past_value, value), dim=-2)
+        if layer_past is not None:
+            past_value = layer_past[1]  # transpose back cf below
+            value = torch.cat((past_value, value), dim=-2)
 
-        past_key = layer_past[0]  # .transpose(-2, -1)
-        key = torch.cat((past_key, key), dim=-2)  # this one crashes colab
+            past_key = layer_past[0]  # .transpose(-2, -1)
+            key = torch.cat((past_key, key), dim=-2)
+
         present = torch.stack([key, value])  # transpose to have same shapes for stacking
 
-        a = self._attn(query, key.transpose(-2, -1), value, ds)
+        a = self._attn(query, key.transpose(-2, -1), value, mask)
         a = self.merge_heads(a)
         a = self.c_proj(a)
 
         return a, present
 
 
-class MLP(nn.Module):
+class MLP(torch.nn.Module):
     def __init__(self, n_state, config):  # in MLP: n_state=3072 (4 * n_embd)
         super(MLP, self).__init__()
-        n_embd = config.n_embd
-        self.c_fc = Conv1D(n_state, n_embd)
-        self.c_proj = Conv1D(n_embd, n_state)
-        self.act = torch.nn.GELU()  # This is a possible difference
+        self.c_fc = Conv1D(n_state, config.n_embd)
+        self.c_proj = Conv1D(config.n_embd, n_state)
+        if hasattr(torch.nn, 'GELU'):
+            self.act = torch.nn.GELU()  # New in torch 1.4.0, but different results from transformers gelu
+        else:
+            self.act = gelu  # the original gelu, written in pytorch
 
     def forward(self, x):
         h = self.act(self.c_fc(x))
@@ -120,59 +97,33 @@ class MLP(nn.Module):
         return h2
 
 
-class Block(nn.Module):
+class Block(torch.nn.Module):
     def __init__(self, n_ctx, config):
         super(Block, self).__init__()
         n_embd = config.n_embd
-        self.ln_1 = nn.LayerNorm(n_embd, eps=config.layer_norm_epsilon)
+        self.ln_1 = torch.nn.LayerNorm(n_embd, eps=config.layer_norm_epsilon)
         self.attn = Attention(n_embd, n_ctx, config)
-        self.ln_2 = nn.LayerNorm(n_embd, eps=config.layer_norm_epsilon)
+        self.ln_2 = torch.nn.LayerNorm(n_embd, eps=config.layer_norm_epsilon)
         self.mlp = MLP(4 * n_embd, config)
 
-    def forward(self, x, layer_past, ds=None):
-        a, present = self.attn(self.ln_1(x), layer_past, ds=ds)
+    def forward(self, x, layer_past, mask):
+        a, present = self.attn(self.ln_1(x), layer_past, mask)
         x = x + a
         x += self.mlp(self.ln_2(x))  # residual
 
         return x, present  # x, present
 
 
-class GPT2PreTrainedModel(PreTrainedModel):
-    """ An abstract class to handle weights initialization and
-        a simple interface for dowloading and loading pretrained models.
-    """
-    config_class = GPT2Config
-    pretrained_model_archive_map = GPT2_PRETRAINED_MODEL_ARCHIVE_MAP
-    load_tf_weights = load_tf_weights_in_gpt2
-    base_model_prefix = "transformer"
-
-    def __init__(self, *inputs, **kwargs):
-        super(GPT2PreTrainedModel, self).__init__(*inputs, **kwargs)
-
-    def _init_weights(self, module):
-        """ Initialize the weights.
-        """
-        if isinstance(module, (nn.Linear, nn.Embedding, Conv1D)):
-            # Slightly different from the TF version which uses truncated_normal for initialization
-            # cf https://github.com/pytorch/pytorch/pull/5617
-            module.weight.data.normal_(mean=0.0, std=self.config.initializer_range)
-            if isinstance(module, (nn.Linear, Conv1D)) and module.bias is not None:
-                module.bias.data.zero_()
-        elif isinstance(module, nn.LayerNorm):
-            module.bias.data.zero_()
-            module.weight.data.fill_(1.0)
-
-
 class GPT2Model(GPT2PreTrainedModel):
 
-    def __init__(self, config):
+    def __init__(self, config: GPT2Config):
         super(GPT2Model, self).__init__(config)
 
-        self.wte = nn.Embedding(config.vocab_size, config.n_embd)
-        self.wpe = nn.Embedding(config.n_positions, config.n_embd)
-        self.h = nn.ModuleList([Block(config.n_ctx, config) for _ in range(config.n_layer)])
-        self.ln_f = nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
-
+        self.wte = torch.nn.Embedding(config.vocab_size, config.n_embd)
+        self.wpe = torch.nn.Embedding(config.n_positions, config.n_embd)
+        self.h = torch.nn.ModuleList([Block(config.n_ctx, config) for _ in range(config.n_layer)])
+        self.ln_f = torch.nn.LayerNorm(config.n_embd, eps=config.layer_norm_epsilon)
+        self.register_buffer("bigmask", torch.tril(torch.ones((config.n_ctx, config.n_ctx), dtype=torch.bool)))
         self.init_weights()
 
     def get_input_embeddings(self):
@@ -186,19 +137,19 @@ class GPT2Model(GPT2PreTrainedModel):
             raise ValueError("You have to specify either input_ids or inputs_embeds")
 
         input_len = input_ids.size(0)
-        past_length = past.size(-2)
-        ds = DynamicSizes(-1, input_len, past_length, input_len + past_length)
-
-        position_embeds = self.wpe.weight.data[past_length:past_length + input_len]
+        past_length = past.size(-2) if past is not None else 0
+        total_len = input_len + past_length
+        position_embeds = self.wpe.weight.data[past_length:total_len].view(input_len, self.config.n_embd)
 
         inputs_embeds = self.wte(input_ids)
         hidden_states = inputs_embeds + position_embeds
 
+        mask = self.bigmask[None, past_length:total_len, :total_len]
         presents = []
         for i in range(self.config.n_layer):
-            layer_past = past[i]
+            layer_past = past[i] if past is not None else None
             trans_block = self.h[i]
-            hidden_states, present = trans_block(hidden_states, layer_past=layer_past, ds=ds)
+            hidden_states, present = trans_block(hidden_states, layer_past, mask)
             presents.append(present)
 
         hidden_states = self.ln_f(hidden_states)
@@ -210,7 +161,7 @@ class GPT2LMHeadModel(GPT2PreTrainedModel):
     def __init__(self, config):
         super(GPT2LMHeadModel, self).__init__(config)
         self.transformer = GPT2Model(config)
-        self.lm_head = nn.Linear(config.n_embd, config.vocab_size, bias=False)
+        self.lm_head = torch.nn.Linear(config.n_embd, config.vocab_size, bias=False)
 
         self.init_weights()
 

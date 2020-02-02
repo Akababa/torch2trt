@@ -13,15 +13,11 @@ def convert_identity(ctx):
 
 
 @tensorrt_converter('torch.Tensor.to')
-def convert_to(ctx):
+def convert_to(ctx: ConversionContext):
     input_trt = ctx.get_arg("input", pos=0, to_trt=True)
     dtype = ctx.get_arg("dtype", 1, None)
     if isinstance(dtype, torch.dtype):
-        trt_dtype = torch_dtype_to_trt(dtype)
-        layer = ctx.network.add_identity(input_trt)
-        # layer.precision = trt_dtype
-        layer.set_output_dtype(0, trt_dtype)
-        output_trt = layer.get_output(0)
+        output_trt = ctx.convert_dtype_to(input_trt, torch_dtype_to_trt(dtype))
     else:
         output_trt = input_trt
 
